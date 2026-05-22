@@ -3871,6 +3871,20 @@ components:
           description: List of policies applied only to this operation (overrides or adds to API-level policies)
           items:
             $ref: "#/components/schemas/Policy"
+        upstream:
+          $ref: "#/components/schemas/OperationUpstream"
+          description: Per-operation upstream override with main and sandbox sub-fields.
+
+    OperationUpstream:
+      type: object
+      description: Per-operation upstream override. Missing sub-fields fall back to API-level upstream.
+      properties:
+        main:
+          $ref: "#/components/schemas/Upstream"
+          description: Production vhost override.
+        sandbox:
+          $ref: "#/components/schemas/Upstream"
+          description: Sandbox vhost override.
 
     Policy:
       type: object

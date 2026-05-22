@@ -412,7 +412,7 @@ func (v *APIValidator) validateRestData(spec *api.APIConfigData) []ValidationErr
 	}
 
 	// Validate operations
-	errors = append(errors, v.validateOperations(spec.Operations)...)
+	errors = append(errors, v.validateOperations(spec.Operations, spec.UpstreamDefinitions)...)
 
 	return errors
 }
@@ -543,7 +543,7 @@ func (v *APIValidator) validatePathParametersForAsyncAPIs(path string) bool {
 }
 
 // validateOperations validates the operations configuration
-func (v *APIValidator) validateOperations(operations []api.Operation) []ValidationError {
+func (v *APIValidator) validateOperations(operations []api.Operation, upstreamDefinitions *[]api.UpstreamDefinition) []ValidationError {
 	var errors []ValidationError
 
 	if len(operations) == 0 {
@@ -596,8 +596,48 @@ func (v *APIValidator) validateOperations(operations []api.Operation) []Validati
 				Message: "Operation path has unbalanced braces in parameters",
 			})
 		}
+
+		// Validate per-operation upstream override (main / sandbox)
+		if op.Upstream != nil {
+			errors = append(errors, v.validateOperationUpstream(i, op.Upstream, upstreamDefinitions)...)
+		}
 	}
 
+	return errors
+}
+
+// validateOperationUpstream validates per-op upstream main / sandbox sub-fields.
+// Reuses validateUpstream for url/ref checks and rewrites the error field paths
+// to point at spec.operations[N].upstream.<sub>...
+func (v *APIValidator) validateOperationUpstream(opIdx int, up *api.OperationUpstream, upstreamDefinitions *[]api.UpstreamDefinition) []ValidationError {
+	var errors []ValidationError
+	if up == nil {
+		return errors
+	}
+	if up.Main == nil && up.Sandbox == nil {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("spec.operations[%d].upstream", opIdx),
+			Message: "At least one of 'main' or 'sandbox' must be set",
+		})
+		return errors
+	}
+	rewrite := func(errs []ValidationError, sub string) []ValidationError {
+		oldPrefix := "spec.upstream." + sub
+		newPrefix := fmt.Sprintf("spec.operations[%d].upstream.%s", opIdx, sub)
+		for i := range errs {
+			if strings.HasPrefix(errs[i].Field, oldPrefix) {
+				errs[i].Field = newPrefix + strings.TrimPrefix(errs[i].Field, oldPrefix)
+			}
+			// else: leave the field untouched — do not mangle unexpected prefixes
+		}
+		return errs
+	}
+	if up.Main != nil {
+		errors = append(errors, rewrite(v.validateUpstream("main", up.Main, upstreamDefinitions), "main")...)
+	}
+	if up.Sandbox != nil {
+		errors = append(errors, rewrite(v.validateUpstream("sandbox", up.Sandbox, upstreamDefinitions), "sandbox")...)
+	}
 	return errors
 }
 

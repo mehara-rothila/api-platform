@@ -88,9 +88,10 @@ type Policy struct {
 
 // UpstreamCluster represents an Envoy cluster with its endpoints.
 type UpstreamCluster struct {
-	BasePath  string
-	Endpoints []Endpoint
-	TLS       *UpstreamTLS
+	BasePath       string
+	Endpoints      []Endpoint
+	TLS            *UpstreamTLS
+	ConnectTimeout *time.Duration
 }
 
 // Endpoint is a single upstream host:port target.
@@ -107,4 +108,4 @@ type UpstreamTLS struct {
 // ConfigTransformer transforms a StoredConfig into a RuntimeDeployConfig.
 type ConfigTransformer interface {
 	Transform(cfg *StoredConfig) (*RuntimeDeployConfig, error)
-}
+} 

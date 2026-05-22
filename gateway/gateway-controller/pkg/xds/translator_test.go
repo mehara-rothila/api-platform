@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -2013,4 +2014,214 @@ func TestTranslator_CreateDynamicFwdListenerForWebSubHub(t *testing.T) {
 		assert.Equal(t, "0.0.0.0", listener.GetAddress().GetSocketAddress().GetAddress())
 		assert.Equal(t, core.SocketAddress_TCP, listener.GetAddress().GetSocketAddress().GetProtocol())
 	})
+}
+
+// TestResolvePerOpUpstream_WithDirectURL asserts that a direct URL produces
+// a hash-named cluster with the op_ prefix (legacy path).
+func TestResolvePerOpUpstream_WithDirectURL(t *testing.T) {
+	translator := &Translator{}
+	upstream := &api.Upstream{Url: strPtr("http://user-svc:8080")}
+
+	clusterName, parsedURL, timeout, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, nil)
+
+	require.NoError(t, err)
+	assert.True(t, len(clusterName) > len("op_") && clusterName[:len("op_")] == "op_",
+		"per-op cluster name must start with op_, got %q", clusterName)
+	assert.Equal(t, "http", parsedURL.Scheme)
+	assert.Equal(t, "user-svc:8080", parsedURL.Host)
+	assert.Nil(t, timeout, "direct URL should not carry a timeout")
+}
+
+// TestResolvePerOpUpstream_WithRef asserts that a ref resolves through
+// upstreamDefinitions and produces a hash-named cluster derived from the resolved URL (legacy path).
+func TestResolvePerOpUpstream_WithRef(t *testing.T) {
+	translator := &Translator{}
+	ref := "user-svc-cluster"
+	upstream := &api.Upstream{Ref: &ref}
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "user-svc-cluster",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://user-svc:8080"},
+			},
+		},
+	}
+
+	clusterName, parsedURL, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, definitions)
+
+	require.NoError(t, err)
+	assert.True(t, len(clusterName) > len("op_") && clusterName[:len("op_")] == "op_",
+		"ref-resolved per-op cluster name must start with op_, got %q", clusterName)
+	assert.Equal(t, "user-svc:8080", parsedURL.Host)
+}
+
+// TestResolvePerOpUpstream_DedupSameURL asserts that identical URLs produce
+// identical cluster names (dedup foundation for the caller's idempotent registration map).
+func TestResolvePerOpUpstream_DedupSameURL(t *testing.T) {
+	translator := &Translator{}
+	a := &api.Upstream{Url: strPtr("http://shared-svc:8080")}
+	b := &api.Upstream{Url: strPtr("http://shared-svc:8080")}
+
+	nameA, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", a, nil)
+	require.NoError(t, err)
+	nameB, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", b, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, nameA, nameB, "identical URLs must produce identical cluster names")
+}
+
+// TestResolvePerOpUpstream_DistinctEnvs — distinct env labels never collide on
+// the cluster name (proves the hash input includes the env).
+func TestResolvePerOpUpstream_DistinctEnvs(t *testing.T) {
+	translator := &Translator{}
+	a := &api.Upstream{Url: strPtr("http://same-svc:8080")}
+	b := &api.Upstream{Url: strPtr("http://same-svc:8080")}
+
+	nameA, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", a, nil)
+	require.NoError(t, err)
+	nameB, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "sandbox", b, nil)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, nameA, nameB, "distinct envs must produce distinct cluster names")
+}
+
+// TestResolvePerOpUpstream_InvalidURL — invalid scheme is rejected.
+func TestResolvePerOpUpstream_InvalidURL(t *testing.T) {
+	translator := &Translator{}
+	upstream := &api.Upstream{Url: strPtr("ftp://bad-scheme:8080")}
+
+	_, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http/https")
+}
+
+// TestResolvePerOpUpstream_RefWithNilDefinitions — ref-based per-op with no
+// upstreamDefinitions slice at all. Must return a clean error, not panic on the
+// nil dereference.
+func TestResolvePerOpUpstream_RefWithNilDefinitions(t *testing.T) {
+	translator := &Translator{}
+	ref := "user-svc-cluster"
+	upstream := &api.Upstream{Ref: &ref}
+
+	_, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, nil)
+	require.Error(t, err)
+	// The exact message is not pinned — only that an error is returned and the call does not panic on nil upstreamDefinitions.
+}
+
+// TestResolvePerOpUpstream_UnknownRef — ref points at a definition that's not
+// in the upstreamDefinitions slice. Must return an error, not silently use a
+// default upstream.
+func TestResolvePerOpUpstream_UnknownRef(t *testing.T) {
+	translator := &Translator{}
+	ref := "missing-cluster"
+	upstream := &api.Upstream{Ref: &ref}
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "some-other-cluster",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://other-svc:8080"},
+			},
+		},
+	}
+
+	_, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, definitions)
+	require.Error(t, err, "ref to non-existent definition must error")
+}
+
+// TestResolvePerOpUpstream_WhitespaceURL — URL that's only whitespace after
+// trimming must be treated as missing, not used verbatim. Otherwise the cluster
+// would be built from an invalid URL.
+func TestResolvePerOpUpstream_WhitespaceURL(t *testing.T) {
+	translator := &Translator{}
+	wsURL := "   "
+	upstream := &api.Upstream{Url: &wsURL}
+
+	_, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, nil)
+	require.Error(t, err, "whitespace-only URL must error, not produce a broken cluster")
+}
+
+// TestTranslateConfigs_PerOpSandboxClusterEmitted asserts that the legacy path
+// emits a dedicated per-op sandbox cluster and routes the sandbox vhost to it
+// when an operation declares a per-op sandbox upstream override.
+func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
+	translator := createTestTranslator()
+
+	sbVhost := "sandbox.local"
+	apiData := api.APIConfigData{
+		DisplayName: "Test API",
+		Context:     "/test",
+		Version:     "v1.0",
+		Vhosts: &struct {
+			Main    string  `json:"main" yaml:"main"`
+			Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main:    "localhost",
+			Sandbox: &sbVhost,
+		},
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main: api.Upstream{Url: strPtr("http://api-main:8080")},
+		},
+		Operations: []api.Operation{
+			{
+				Method: "GET", Path: "/users",
+				Upstream: &api.OperationUpstream{
+					Sandbox: &api.Upstream{Url: strPtr("http://user-svc-sb:8080")},
+				},
+			},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID: "sandbox-op-api",
+		Kind: string(api.RestAPIKindRestApi),
+		Configuration: api.RestAPI{
+			Kind:     api.RestAPIKindRestApi,
+			Metadata: api.Metadata{Name: "sandbox-op-api"},
+			Spec:     apiData,
+		},
+	}
+
+	resources, err := translator.TranslateConfigs([]*models.StoredConfig{cfg}, "test-correlation")
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+
+	clusters := resources[resource.ClusterType]
+	routeConfigs := resources[resource.RouteType]
+	require.NotEmpty(t, clusters, "expected at least one cluster")
+	require.NotEmpty(t, routeConfigs, "expected at least one route configuration")
+
+	// Find the per-op sandbox cluster
+	var perOpClusterName string
+	for _, c := range clusters {
+		name := c.(*cluster.Cluster).GetName()
+		if strings.HasPrefix(name, "op_") {
+			perOpClusterName = name
+			break
+		}
+	}
+	require.NotEmpty(t, perOpClusterName, "expected a per-op sandbox cluster with op_ prefix")
+
+	// Find the sandbox route and verify it points to the per-op cluster
+	var sandboxRouteFound bool
+	for _, rc := range routeConfigs {
+		routeConfig := rc.(*route.RouteConfiguration)
+		for _, vh := range routeConfig.VirtualHosts {
+			for _, r := range vh.Routes {
+				action := r.GetRoute()
+				if action != nil && action.GetCluster() == perOpClusterName {
+					sandboxRouteFound = true
+					break
+				}
+			}
+		}
+	}
+	assert.True(t, sandboxRouteFound, "expected a sandbox route pointing to the per-op cluster %q", perOpClusterName)
 }

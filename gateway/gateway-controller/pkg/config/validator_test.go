@@ -848,3 +848,131 @@ func TestValidateUpstream_WithRefAndDefinitions(t *testing.T) {
 	errors := validator.validateUpstream("main", upstream, definitions)
 	assert.Empty(t, errors)
 }
+
+// strPtrV is a small local helper for the per-op validator tests.
+func strPtrV(s string) *string { return &s }
+
+// TestValidateOperationUpstream_ValidURL asserts that a well-formed per-op URL passes validation.
+func TestValidateOperationUpstream_ValidURL(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.OperationUpstream{
+		Main: &api.Upstream{Url: strPtrV("http://user-svc:8080")},
+	}
+
+	errors := validator.validateOperationUpstream(0, up, nil)
+	assert.Empty(t, errors)
+}
+
+// TestValidateOperationUpstream_InvalidURL asserts that a malformed scheme is rejected
+// with a per-op-scoped error field path.
+func TestValidateOperationUpstream_InvalidURL(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.OperationUpstream{
+		Main: &api.Upstream{Url: strPtrV("ftp://bad-scheme:8080")},
+	}
+
+	errors := validator.validateOperationUpstream(2, up, nil)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[2].upstream.main") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "validation error should be scoped to spec.operations[2].upstream.main, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_BothUrlAndRef asserts that a mutual-exclusion violation
+// is rejected per sub-field.
+func TestValidateOperationUpstream_BothUrlAndRef(t *testing.T) {
+	validator := NewAPIValidator()
+	ref := "user-svc-cluster"
+	up := &api.OperationUpstream{
+		Sandbox: &api.Upstream{
+			Url: strPtrV("http://user-svc:8080"),
+			Ref: &ref,
+		},
+	}
+
+	errors := validator.validateOperationUpstream(1, up, nil)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[1].upstream.sandbox") &&
+			strings.Contains(strings.ToLower(e.Message), "exactly one") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected mutual-exclusion error scoped to sandbox sub-field, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_UnknownRef asserts that a ref not matching any
+// upstreamDefinition is rejected.
+func TestValidateOperationUpstream_UnknownRef(t *testing.T) {
+	validator := NewAPIValidator()
+	ref := "missing-cluster"
+	up := &api.OperationUpstream{
+		Main: &api.Upstream{Ref: &ref},
+	}
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "user-svc-cluster",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://user-svc:8080"},
+			},
+		},
+	}
+
+	errors := validator.validateOperationUpstream(0, up, definitions)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected unknown-ref error scoped to main.ref, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_EmptyWrapper asserts that a wrapper with neither
+// main nor sandbox set is rejected.
+func TestValidateOperationUpstream_EmptyWrapper(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.OperationUpstream{}
+
+	errors := validator.validateOperationUpstream(3, up, nil)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if e.Field == "spec.operations[3].upstream" &&
+			strings.Contains(strings.ToLower(e.Message), "at least one") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected anyOf error at wrapper level, got %+v", errors)
+}
+
+func TestValidateOperationUpstream_EmptyLeaf(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.OperationUpstream{
+		Main: &api.Upstream{}, // empty leaf — no url, no ref
+	}
+
+	errors := validator.validateOperationUpstream(0, up, nil)
+	require.NotEmpty(t, errors, "empty leaf must be rejected")
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Message, "Must specify either 'url' or 'ref'") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected rejection message about url/ref requirement, got %+v", errors)
+}

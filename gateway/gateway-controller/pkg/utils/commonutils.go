@@ -21,10 +21,11 @@ package utils
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
-
+	
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -117,4 +118,15 @@ func GenerateDeterministicUUIDv7(deploymentID string, performedAt time.Time) str
 
 	u, _ := uuid.FromBytes(b[:])
 	return u.String()
+}
+
+// PerOpClusterKey returns a deterministic, hex-encoded cluster key fragment for a
+// per-operation upstream cluster. The key is derived from SHA-256 of
+// apiID|METHOD|path|env (env is "main" or "sandbox"). The URL is intentionally
+// excluded so that upstream URL edits update endpoints in-place rather than
+// destroying and recreating the cluster.
+func PerOpClusterKey(apiID, method, path, env string) string {
+	hashInput := apiID + "|" + strings.ToUpper(method) + "|" + path + "|" + env
+	sum := sha256.Sum256([]byte(hashInput))
+	return hex.EncodeToString(sum[:8]) // 8 bytes = 16 hex chars
 }

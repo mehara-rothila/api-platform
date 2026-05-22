@@ -113,7 +113,7 @@ func TestDerivePolicyFromAPIConfig_SandboxVhosts(t *testing.T) {
 		{
 			name:           "sandbox present but url and ref both nil",
 			sandbox:        &api.Upstream{},
-			wantRouteCount: 2,
+			wantRouteCount: 1,
 		},
 	}
 
@@ -127,7 +127,7 @@ func TestDerivePolicyFromAPIConfig_SandboxVhosts(t *testing.T) {
 			assert.Len(t, result.Configuration.Routes, tc.wantRouteCount,
 				"expected %d route key(s) for case %q", tc.wantRouteCount, tc.name)
 
-			if tc.sandbox != nil {
+			if tc.sandbox != nil && (tc.sandbox.Url != nil || tc.sandbox.Ref != nil) {
 				// Verify that the sandbox vhost ("sandbox.local") appears in at least one route key.
 				hasSandboxRoute := false
 				for _, r := range result.Configuration.Routes {
@@ -255,4 +255,58 @@ func TestDerivePolicyFromAPIConfig_UnknownPolicySkipped(t *testing.T) {
 	// Unknown policy should be skipped; with no resolved policies the result is nil.
 	result := DerivePolicyFromAPIConfig(cfg, testRouterConfig(), &config.Config{}, defs)
 	assert.Nil(t, result, "expected nil result when all policies are unresolvable")
+}
+
+// TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox — when an API has NO
+// API-level sandbox but an operation declares a per-op sandbox upstream, the policy
+// builder must still emit a sandbox policy chain for that operation so the sandbox
+// route created by the transformer gets policies attached. Without this, sandbox
+// traffic on per-op sandbox routes would run with no policies (no auth, no rate
+// limiting, no analytics).
+func TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox(t *testing.T) {
+	apiConfig := api.RestAPI{
+		Kind:     api.RestAPIKindRestApi,
+		Metadata: api.Metadata{Name: "test-api"},
+		Spec: api.APIConfigData{
+			DisplayName: "Test API",
+			Context:     "/test",
+			Version:     "1.0.0",
+			Operations: []api.Operation{
+				{
+					Method: "GET", Path: "/hello",
+					Upstream: &api.OperationUpstream{
+						Sandbox: &api.Upstream{Url: ptr("http://op-sb:9000")},
+					},
+				},
+			},
+			Policies: &[]api.Policy{{Name: "header-mutate", Version: "v1"}},
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{
+				Main:    api.Upstream{Url: ptr("http://backend:8080")},
+				Sandbox: nil, // intentionally no API-level sandbox
+			},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID:                "test-api",
+		Kind:                string(api.RestAPIKindRestApi),
+		Configuration:       apiConfig,
+		SourceConfiguration: apiConfig,
+	}
+
+	result := DerivePolicyFromAPIConfig(cfg, testRouterConfig(), &config.Config{}, policyDefs)
+	require.NotNil(t, result, "expected non-nil policy config (API has policies)")
+	require.Len(t, result.Configuration.Routes, 2,
+		"expected both main and sandbox policy chains for an operation with per-op sandbox")
+
+	hasSandboxRoute := false
+	for _, r := range result.Configuration.Routes {
+		if strings.Contains(r.RouteKey, "sandbox.local") {
+			hasSandboxRoute = true
+			break
+		}
+	}
+	assert.True(t, hasSandboxRoute, "sandbox vhost route must be emitted for per-op sandbox operation")
 }

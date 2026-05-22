@@ -110,3 +110,63 @@ parent:
 		})
 	}
 }
+
+// TestPerOpClusterKey verifies the cluster-key hash function pins the contract
+// the per-op upstream feature depends on:
+//   - deterministic for identical inputs
+//   - distinct on any input field (apiID, method, path, env)
+//   - case-insensitive on method (uppercased before hashing)
+//   - the URL is NOT a hash input (so URL edits become EDS updates, not CDS rebuilds)
+func TestPerOpClusterKey(t *testing.T) {
+	t.Run("deterministic for identical inputs", func(t *testing.T) {
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-1", "GET", "/users", "main")
+		assert.Equal(t, a, b, "same inputs must produce same hash")
+		assert.Len(t, a, 16, "hash must be 16 hex chars (8 bytes of SHA-256)")
+	})
+
+	t.Run("method casing is normalized to uppercase", func(t *testing.T) {
+		upper := PerOpClusterKey("api-1", "GET", "/users", "main")
+		lower := PerOpClusterKey("api-1", "get", "/users", "main")
+		mixed := PerOpClusterKey("api-1", "Get", "/users", "main")
+		assert.Equal(t, upper, lower, "lowercase method must hash to same key as uppercase")
+		assert.Equal(t, upper, mixed, "mixed-case method must hash to same key as uppercase")
+	})
+
+	t.Run("different apiID produces different hash", func(t *testing.T) {
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-2", "GET", "/users", "main")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("different method produces different hash", func(t *testing.T) {
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-1", "POST", "/users", "main")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("different path produces different hash", func(t *testing.T) {
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-1", "GET", "/orders", "main")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("different env produces different hash", func(t *testing.T) {
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-1", "GET", "/users", "sandbox")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("URL is NOT a hash input (EDS-stable cluster naming)", func(t *testing.T) {
+		// The whole point of the hash design: the URL is deliberately excluded
+		// so an upstream URL change becomes an EDS endpoint update (no connection
+		// drain), not a CDS cluster recreate. PerOpClusterKey takes 4 args; URL
+		// is not one of them. This test pins that contract at the API surface —
+		// if someone ever adds a URL parameter, the function signature changes
+		// and this test must change with it, forcing a deliberate decision.
+		a := PerOpClusterKey("api-1", "GET", "/users", "main")
+		b := PerOpClusterKey("api-1", "GET", "/users", "main")
+		assert.Equal(t, a, b,
+			"same (apiID, method, path, env) must produce same hash regardless of any external URL")
+	})
+}

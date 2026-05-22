@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	commonconstants "github.com/wso2/api-platform/common/constants"
 	versionutil "github.com/wso2/api-platform/common/version"
@@ -140,9 +141,24 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 	// Determine vhosts to create routes for.
 	// Sandbox is active when a sandbox upstream is configured via either url or ref.
-	hasSandbox := apiData.Upstream.Sandbox != nil &&
+	apiSandboxHasContent := apiData.Upstream.Sandbox != nil &&
 		((apiData.Upstream.Sandbox.Url != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Url) != "") ||
 			(apiData.Upstream.Sandbox.Ref != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Ref) != ""))
+	hasSandbox := apiSandboxHasContent
+
+	// Also active if any operation defines a per-op sandbox upstream.
+	if !hasSandbox {
+		for _, op := range apiData.Operations {
+			if op.Upstream != nil && op.Upstream.Sandbox != nil {
+				sb := op.Upstream.Sandbox
+				if (sb.Url != nil && strings.TrimSpace(*sb.Url) != "") ||
+					(sb.Ref != nil && strings.TrimSpace(*sb.Ref) != "") {
+					hasSandbox = true
+					break
+				}
+			}
+		}
+	}
 
 	// Guard: sandbox and main vhosts must differ, otherwise sandbox routes would
 	// overwrite main routes (same route key) and the sandbox patch would leave only
@@ -153,25 +169,80 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 	// Build routes and policy chains for each operation
 	for _, op := range apiData.Operations {
+		mainVhostClusterKey := mainUpstream.ClusterKey
+		mainVhostUseClusterHeader := useClusterHeader
+		mainVhostDefaultCluster := defaultCluster
+		mainVhostAutoHostRewrite := mainAutoHostRewrite
+
+		sandboxVhostClusterKey := mainUpstream.ClusterKey
+		sandboxVhostUseClusterHeader := useClusterHeader
+		sandboxVhostDefaultCluster := defaultCluster
+		sandboxVhostAutoHostRewrite := mainAutoHostRewrite
+
+		if op.Upstream != nil {
+			if op.Upstream.Main != nil {
+				perOpMain, err := t.addPerOpUpstreamCluster(rdc, string(op.Method), op.Path, "main", op.Upstream.Main, apiData.UpstreamDefinitions)
+				if err != nil {
+					return nil, fmt.Errorf("per-op main upstream for %s %s: %w", string(op.Method), op.Path, err)
+				}
+				mainVhostClusterKey = perOpMain.ClusterKey
+				mainVhostUseClusterHeader = false
+				mainVhostDefaultCluster = ""
+				mainVhostAutoHostRewrite = true
+				if op.Upstream.Main.HostRewrite != nil && *op.Upstream.Main.HostRewrite == api.Manual {
+					mainVhostAutoHostRewrite = false
+				}
+			}
+			if op.Upstream.Sandbox != nil {
+				perOpSb, err := t.addPerOpUpstreamCluster(rdc, string(op.Method), op.Path, "sandbox", op.Upstream.Sandbox, apiData.UpstreamDefinitions)
+				if err != nil {
+					return nil, fmt.Errorf("per-op sandbox upstream for %s %s: %w", string(op.Method), op.Path, err)
+				}
+				sandboxVhostClusterKey = perOpSb.ClusterKey
+				sandboxVhostUseClusterHeader = false
+				sandboxVhostDefaultCluster = ""
+				sandboxVhostAutoHostRewrite = true
+				if op.Upstream.Sandbox.HostRewrite != nil && *op.Upstream.Sandbox.HostRewrite == api.Manual {
+					sandboxVhostAutoHostRewrite = false
+				}
+			}
+		}
+
 		vhosts := []string{effectiveMainVHost}
 		if hasSandbox {
-			vhosts = append(vhosts, effectiveSandboxVHost)
+			// Only add sandbox vhost when this specific op has sandbox config —
+			// either via API-level sandbox fallback OR a per-op sandbox override.
+			// Without this guard, ops with no sandbox config would get a sandbox
+			// route silently pointing to the main cluster (placeholder default).
+			if apiSandboxHasContent || (op.Upstream != nil && op.Upstream.Sandbox != nil) {
+				vhosts = append(vhosts, effectiveSandboxVHost)
+			}
 		}
 
 		for _, vhost := range vhosts {
 			routeKey := xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, vhost)
 
-			// Build route
+			clusterKey := mainVhostClusterKey
+			vhostUseClusterHeader := mainVhostUseClusterHeader
+			vhostDefaultCluster := mainVhostDefaultCluster
+			autoHostRewrite := mainVhostAutoHostRewrite
+			if vhost == effectiveSandboxVHost {
+				clusterKey = sandboxVhostClusterKey
+				vhostUseClusterHeader = sandboxVhostUseClusterHeader
+				vhostDefaultCluster = sandboxVhostDefaultCluster
+				autoHostRewrite = sandboxVhostAutoHostRewrite
+			}
+
 			rdc.Routes[routeKey] = &models.Route{
 				Method:          string(op.Method),
 				Path:            xds.ConstructFullPath(apiData.Context, apiData.Version, op.Path),
 				OperationPath:   op.Path,
 				Vhost:           vhost,
-				AutoHostRewrite: mainAutoHostRewrite,
+				AutoHostRewrite: autoHostRewrite,
 				Upstream: models.RouteUpstream{
-					ClusterKey:       mainUpstream.ClusterKey,
-					UseClusterHeader: useClusterHeader,
-					DefaultCluster:   defaultCluster,
+					ClusterKey:       clusterKey,
+					UseClusterHeader: vhostUseClusterHeader,
+					DefaultCluster:   vhostDefaultCluster,
 				},
 			}
 
@@ -209,8 +280,9 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 		}
 	}
 
-	// Add sandbox upstream and update sandbox routes if present
-	if hasSandbox {
+	// Add sandbox upstream and update sandbox routes if present.
+	// API-level sandbox is optional when per-op sandbox overrides exist.
+	if hasSandbox && apiSandboxHasContent {
 		sbUpstream, err := t.addUpstreamCluster(rdc, "sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve sandbox upstream: %w", err)
@@ -221,8 +293,12 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			sbAutoHostRewrite = false
 		}
 
-		// Update sandbox vhost routes to point to sandbox cluster
+		// Update sandbox vhost routes to point to sandbox cluster, except ops with
+		// their own per-op sandbox override (already wired in the main loop).
 		for _, op := range apiData.Operations {
+			if op.Upstream != nil && op.Upstream.Sandbox != nil {
+				continue
+			}
 			routeKey := xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, effectiveSandboxVHost)
 			if r, exists := rdc.Routes[routeKey]; exists {
 				r.Upstream.ClusterKey = sbUpstream.ClusterKey
@@ -337,6 +413,73 @@ func (t *RestAPITransformer) addUpstreamCluster(
 	return &upstreamClusterResult{
 		ClusterKey:       clusterKey,
 		EnvoyClusterName: sanitizeEnvoyClusterName(parsedURL.Host, parsedURL.Scheme),
+		BasePath:         basePath,
+	}, nil
+}
+
+// addPerOpUpstreamCluster resolves a per-op upstream (url or ref) and registers a
+// cluster ("op_<16-hex>") in rdc.UpstreamClusters. The cluster name is derived from
+// sha256(apiID + METHOD + path + env), giving each operation+env its own cluster.
+// The upstream URL is intentionally excluded so that URL edits update endpoints
+// in-place rather than destroying and recreating the cluster.
+func (t *RestAPITransformer) addPerOpUpstreamCluster(
+	rdc *models.RuntimeDeployConfig,
+	method string,
+	path string,
+	env string,
+	up *api.Upstream,
+	upstreamDefinitions *[]api.UpstreamDefinition,
+) (*upstreamClusterResult, error) {
+	rawURL, err := resolveUpstreamURL("per-op", up, upstreamDefinitions)
+	if err != nil {
+		return nil, err
+	}
+
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid per-op upstream URL: %w", err)
+	}
+	if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return nil, fmt.Errorf("invalid per-op upstream URL: must include host and http/https scheme")
+	}
+
+	port := ResolvePort(parsedURL)
+	basePath := parsedURL.Path
+	if basePath == "" {
+		basePath = "/"
+	}
+
+	clusterKey := "op_" + utils.PerOpClusterKey(rdc.Metadata.UUID, method, path, env)
+
+	// Extract connect timeout when ref resolves to an upstream definition.
+	var connectTimeout *time.Duration
+	if up.Ref != nil && strings.TrimSpace(*up.Ref) != "" && upstreamDefinitions != nil {
+		refName := strings.TrimSpace(*up.Ref)
+		for _, def := range *upstreamDefinitions {
+			if def.Name == refName && def.Timeout != nil && def.Timeout.Connect != nil {
+				if d, err := time.ParseDuration(strings.TrimSpace(*def.Timeout.Connect)); err == nil && d > 0 {
+					connectTimeout = &d
+				}
+				break
+			}
+		}
+	}
+
+	if _, exists := rdc.UpstreamClusters[clusterKey]; !exists {
+		rdc.UpstreamClusters[clusterKey] = &models.UpstreamCluster{
+			BasePath:       basePath,
+			Endpoints: []models.Endpoint{{
+				Host: parsedURL.Hostname(),
+				Port: port,
+			}},
+			TLS:            &models.UpstreamTLS{Enabled: parsedURL.Scheme == "https"},
+			ConnectTimeout: connectTimeout,
+		}
+	}
+
+	return &upstreamClusterResult{
+		ClusterKey:       clusterKey,
+		EnvoyClusterName: "",
 		BasePath:         basePath,
 	}, nil
 }

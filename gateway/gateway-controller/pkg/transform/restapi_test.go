@@ -20,7 +20,9 @@ package transform
 
 import (
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -324,6 +326,386 @@ func TestResolveUpstreamURL(t *testing.T) {
 	})
 }
 
+// makeRestAPIWithOps builds a RestAPI StoredConfig with caller-supplied operations and
+// both API-level main and sandbox upstreams configured (so per-op tests can observe
+// sandbox-vhost route behavior).
+func makeRestAPIWithOps(ops []api.Operation) *models.StoredConfig {
+	apiData := api.APIConfigData{
+		DisplayName: "Test API",
+		Context:     "/test",
+		Version:     "1.0.0",
+		Operations:  ops,
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main:    api.Upstream{Url: ptrStr("http://api-main:8080")},
+			Sandbox: &api.Upstream{Url: ptrStr("http://api-sandbox:8080")},
+		},
+	}
+	restAPI := api.RestAPI{
+		Kind:     api.RestAPIKindRestApi,
+		Metadata: api.Metadata{Name: "test-api"},
+		Spec:     apiData,
+	}
+	return &models.StoredConfig{
+		UUID:          "test-api",
+		Kind:          string(api.RestAPIKindRestApi),
+		Configuration: restAPI,
+	}
+}
+
+// TestRestAPITransformer_PerOpMainOverridesMainVhost asserts that a main-only override
+// causes the main vhost route to use the per-op cluster while the sandbox vhost route
+// falls back to the API-level sandbox cluster.
+func TestRestAPITransformer_PerOpMainOverridesMainVhost(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://user-svc:8080")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, rdc)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute)
+	assert.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"),
+		"main vhost should use per-op cluster, got %q", mainRoute.Upstream.ClusterKey)
+	assert.False(t, mainRoute.Upstream.UseClusterHeader)
+
+	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, sandboxRoute)
+	assert.False(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "op_"),
+		"sandbox vhost should fall back to API sandbox, got %q", sandboxRoute.Upstream.ClusterKey)
+}
+
+// TestRestAPITransformer_PerOpSandboxOverridesSandboxVhost asserts that a sandbox-only override
+// causes the main vhost to fall back to the API main while the sandbox vhost uses the per-op cluster.
+func TestRestAPITransformer_PerOpSandboxOverridesSandboxVhost(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Sandbox: &api.Upstream{Url: ptrStr("http://user-svc-test:8080")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute)
+	assert.False(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"),
+		"main vhost should fall back to API main, got %q", mainRoute.Upstream.ClusterKey)
+
+	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, sandboxRoute)
+	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "op_"),
+		"sandbox vhost should use per-op cluster, got %q", sandboxRoute.Upstream.ClusterKey)
+}
+
+// TestRestAPITransformer_PerOpBothOverrideBothVhosts asserts that both vhosts get distinct
+// per-op clusters when main and sandbox are overridden.
+func TestRestAPITransformer_PerOpBothOverrideBothVhosts(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main:    &api.Upstream{Url: ptrStr("http://user-svc:8080")},
+				Sandbox: &api.Upstream{Url: ptrStr("http://user-svc-test:8080")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, mainRoute)
+	require.NotNil(t, sandboxRoute)
+
+	assert.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"))
+	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "op_"))
+	assert.NotEqual(t, mainRoute.Upstream.ClusterKey, sandboxRoute.Upstream.ClusterKey,
+		"distinct per-op URLs must produce distinct cluster keys")
+}
+
+// TestRestAPITransformer_NoPerOpUsesAPILevelClusters — regression — without per-op
+// upstream the routes still use the API-level main/sandbox clusters.
+func TestRestAPITransformer_NoPerOpUsesAPILevelClusters(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{Method: "GET", Path: "/users"},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, mainRoute)
+	require.NotNil(t, sandboxRoute)
+	assert.False(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"))
+	assert.False(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "op_"))
+}
+
+// TestRestAPITransformer_PerOpDistinctOpsSameURL asserts that two distinct operations
+// pointing at the same backend URL produce separate clusters because the hash includes
+// method and path.
+func TestRestAPITransformer_PerOpDistinctOpsSameURL(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://shared-svc:8080")},
+			},
+		},
+		{
+			Method: "POST", Path: "/orders",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://shared-svc:8080")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	opCount := 0
+	for k := range rdc.UpstreamClusters {
+		if strings.HasPrefix(k, "op_") {
+			opCount++
+		}
+	}
+	assert.Equal(t, 2, opCount, "two distinct ops with same URL should produce two clusters under per-op naming")
+}
+
+// TestRestAPITransformer_PerOpDistinctURLs asserts that distinct backend URLs produce
+// distinct per-op cluster entries (no false dedup).
+func TestRestAPITransformer_PerOpDistinctURLs(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://user-svc:8080")},
+			},
+		},
+		{
+			Method: "POST", Path: "/orders",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://order-svc:9090")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	opCount := 0
+	for k := range rdc.UpstreamClusters {
+		if strings.HasPrefix(k, "op_") {
+			opCount++
+		}
+	}
+	assert.Equal(t, 2, opCount, "distinct URLs must produce distinct per-op clusters")
+}
+
+// TestRestAPITransformer_PerOpClusterIsolatedAcrossAPIs asserts that two APIs with the
+// same operation pointing at the same backend URL produce different per-op cluster keys
+// because apiID is part of the hash input.
+func TestRestAPITransformer_PerOpClusterIsolatedAcrossAPIs(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+
+	cfgA := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://shared-svc:8080")},
+			},
+		},
+	})
+	cfgA.UUID = "api-aaa"
+
+	cfgB := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://shared-svc:8080")},
+			},
+		},
+	})
+	cfgB.UUID = "api-bbb"
+
+	rdcA, err := transformer.Transform(cfgA)
+	require.NoError(t, err)
+	rdcB, err := transformer.Transform(cfgB)
+	require.NoError(t, err)
+
+	var keyA, keyB string
+	for k := range rdcA.UpstreamClusters {
+		if strings.HasPrefix(k, "op_") {
+			keyA = k
+		}
+	}
+	for k := range rdcB.UpstreamClusters {
+		if strings.HasPrefix(k, "op_") {
+			keyB = k
+		}
+	}
+
+	require.NotEmpty(t, keyA)
+	require.NotEmpty(t, keyB)
+	assert.NotEqual(t, keyA, keyB, "same URL across different APIs must produce different per-op cluster keys")
+}
+
+// TestRestAPITransformer_PerOpSandboxWithoutAPILevelSandbox — guard regression.
+// API-level Sandbox is nil, but one op declares a per-op sandbox upstream. The
+// sandbox vhost must be created only for that op; ops without per-op sandbox
+// must NOT get a sandbox route (otherwise they'd silently route to the main
+// cluster on the sandbox vhost).
+func TestRestAPITransformer_PerOpSandboxWithoutAPILevelSandbox(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+
+	apiData := api.APIConfigData{
+		DisplayName: "Test API",
+		Context:     "/test",
+		Version:     "1.0.0",
+		Operations: []api.Operation{
+			{
+				Method: "GET", Path: "/users",
+				Upstream: &api.OperationUpstream{
+					Sandbox: &api.Upstream{Url: ptrStr("http://user-svc-test:8080")},
+				},
+			},
+			{Method: "GET", Path: "/orders"},
+		},
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main:    api.Upstream{Url: ptrStr("http://api-main:8080")},
+			Sandbox: nil,
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID: "test-api",
+		Kind: string(api.RestAPIKindRestApi),
+		Configuration: api.RestAPI{
+			Kind:     api.RestAPIKindRestApi,
+			Metadata: api.Metadata{Name: "test-api"},
+			Spec:     apiData,
+		},
+	}
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, rdc)
+
+	usersMain := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, usersMain, "op with per-op sandbox must still have a main route")
+	assert.False(t, strings.HasPrefix(usersMain.Upstream.ClusterKey, "op_"),
+		"main vhost should fall back to API main cluster, got %q", usersMain.Upstream.ClusterKey)
+
+	usersSandbox := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, usersSandbox, "op with per-op sandbox must have a sandbox route")
+	assert.True(t, strings.HasPrefix(usersSandbox.Upstream.ClusterKey, "op_"),
+		"sandbox vhost should use per-op cluster, got %q", usersSandbox.Upstream.ClusterKey)
+
+	ordersMain := rdc.Routes["GET|/test/orders|main.local"]
+	require.NotNil(t, ordersMain, "op without per-op upstream must have a main route")
+	assert.False(t, strings.HasPrefix(ordersMain.Upstream.ClusterKey, "op_"))
+
+	_, ordersHasSandbox := rdc.Routes["GET|/test/orders|sandbox.local"]
+	assert.False(t, ordersHasSandbox,
+		"op without per-op sandbox must NOT get a sandbox route when API-level sandbox is nil")
+}
+
+// TestRestAPITransformer_PerOpMainSandboxSameURL — when Main and Sandbox
+// sub-fields of the same operation point at the same URL, they still get separate
+// clusters because the env label ("main" vs "sandbox") differs.
+func TestRestAPITransformer_PerOpMainSandboxSameURL(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main:    &api.Upstream{Url: ptrStr("http://same-svc:8080")},
+				Sandbox: &api.Upstream{Url: ptrStr("http://same-svc:8080")},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	opCount := 0
+	for k := range rdc.UpstreamClusters {
+		if strings.HasPrefix(k, "op_") {
+			opCount++
+		}
+	}
+	assert.Equal(t, 2, opCount, "Main and Sandbox are separate envs → separate clusters even with same URL")
+}
+
+// TestRestAPITransformer_PerOpMainHostRewriteManualDisablesAuto asserts that setting
+// HostRewrite to Manual on a per-op main upstream disables AutoHostRewrite on the route.
+func TestRestAPITransformer_PerOpMainHostRewriteManualDisablesAuto(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	manual := api.Manual
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://user-svc:8080"), HostRewrite: &manual},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute)
+	assert.False(t, mainRoute.AutoHostRewrite,
+		"per-op main with HostRewrite=manual must disable AutoHostRewrite")
+}
+
+// TestRestAPITransformer_PerOpMainHostRewriteAutoLeavesAutoEnabled asserts that leaving
+// HostRewrite as Auto (or nil) on a per-op main upstream keeps AutoHostRewrite enabled.
+func TestRestAPITransformer_PerOpMainHostRewriteAutoLeavesAutoEnabled(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	auto := api.Auto
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.OperationUpstream{
+				Main: &api.Upstream{Url: ptrStr("http://user-svc:8080"), HostRewrite: &auto},
+			},
+		},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute)
+	assert.True(t, mainRoute.AutoHostRewrite,
+		"per-op main with HostRewrite=auto must keep AutoHostRewrite enabled")
+}
+
 // TestResolvePort checks port resolution with explicit, default-http and default-https.
 func TestResolvePort(t *testing.T) {
 	tests := []struct {
@@ -343,4 +725,70 @@ func TestResolvePort(t *testing.T) {
 			assert.Equal(t, tt.expected, ResolvePort(u))
 		})
 	}
+}
+
+// TestRestAPITransformer_PerOpRefPropagatesConnectTimeout — when a per-op upstream
+// uses a ref to an upstreamDefinition that has a connect timeout, the timeout must
+// flow into the resulting per-op UpstreamCluster.ConnectTimeout field. Without this,
+// per-op clusters built from refs would silently drop the timeout configured on the
+// referenced definition.
+func TestRestAPITransformer_PerOpRefPropagatesConnectTimeout(t *testing.T) {
+	connectTimeout := "7s"
+	upstreamDefinitions := []api.UpstreamDefinition{
+		{
+			Name: "user-svc-cluster",
+			Timeout: &api.UpstreamTimeout{
+				Connect: &connectTimeout,
+			},
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://user-svc:8080"},
+			},
+		},
+	}
+
+	refName := "user-svc-cluster"
+	apiData := api.APIConfigData{
+		DisplayName:         "Test API",
+		Context:             "/test",
+		Version:             "1.0.0",
+		UpstreamDefinitions: &upstreamDefinitions,
+		Operations: []api.Operation{
+			{
+				Method: "GET", Path: "/users",
+				Upstream: &api.OperationUpstream{
+					Main: &api.Upstream{Ref: &refName},
+				},
+			},
+		},
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main: api.Upstream{Url: ptrStr("http://api-main:8080")},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID:          "test-api",
+		Kind:          string(api.RestAPIKindRestApi),
+		Configuration: api.RestAPI{Kind: api.RestAPIKindRestApi, Metadata: api.Metadata{Name: "test-api"}, Spec: apiData},
+	}
+
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute, "main route must exist for the per-op operation")
+	require.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"),
+		"main vhost should use a per-op cluster, got %q", mainRoute.Upstream.ClusterKey)
+
+	cluster, ok := rdc.UpstreamClusters[mainRoute.Upstream.ClusterKey]
+	require.True(t, ok, "per-op cluster %q must exist in UpstreamClusters map", mainRoute.Upstream.ClusterKey)
+	require.NotNil(t, cluster.ConnectTimeout,
+		"per-op cluster built from ref must inherit ConnectTimeout from the upstreamDefinition")
+	assert.Equal(t, 7*time.Second, *cluster.ConnectTimeout,
+		"ConnectTimeout should be 7s (parsed from the definition's '7s')")
 }
