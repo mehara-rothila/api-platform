@@ -2052,6 +2052,15 @@ type UpdateSubscriptionJSONRequestBody = SubscriptionUpdateRequest
 // CreateWebBrokerApiJSONRequestBody defines body for CreateWebBrokerApi for application/json ContentType.
 type CreateWebBrokerApiJSONRequestBody = WebBrokerApiRequest
 
+// CreateWebBrokerAPIKeyJSONRequestBody defines body for CreateWebBrokerAPIKey for application/json ContentType.
+type CreateWebBrokerAPIKeyJSONRequestBody = APIKeyCreationRequest
+
+// UpdateWebBrokerAPIKeyJSONRequestBody defines body for UpdateWebBrokerAPIKey for application/json ContentType.
+type UpdateWebBrokerAPIKeyJSONRequestBody = APIKeyUpdateRequest
+
+// RegenerateWebBrokerAPIKeyJSONRequestBody defines body for RegenerateWebBrokerAPIKey for application/json ContentType.
+type RegenerateWebBrokerAPIKeyJSONRequestBody = APIKeyRegenerationRequest
+
 // CreateWebSubAPIJSONRequestBody defines body for CreateWebSubAPI for application/json ContentType.
 type CreateWebSubAPIJSONRequestBody = WebSubAPIRequest
 
@@ -2658,6 +2667,21 @@ type ServerInterface interface {
 	// Get WebBrokerAPI by id
 	// (GET /webbroker-apis/{id})
 	GetWebBrokerApiById(c *gin.Context, id string)
+	// Get the list of API keys for a WebBroker API
+	// (GET /webbroker-apis/{id}/api-keys)
+	ListWebBrokerAPIKeys(c *gin.Context, id string)
+	// Create a new API key for a WebBroker API
+	// (POST /webbroker-apis/{id}/api-keys)
+	CreateWebBrokerAPIKey(c *gin.Context, id string)
+	// Revoke an API key for a WebBroker API
+	// (DELETE /webbroker-apis/{id}/api-keys/{apiKeyName})
+	RevokeWebBrokerAPIKey(c *gin.Context, id string, apiKeyName string)
+	// Update an API key for a WebBroker API
+	// (PUT /webbroker-apis/{id}/api-keys/{apiKeyName})
+	UpdateWebBrokerAPIKey(c *gin.Context, id string, apiKeyName string)
+	// Regenerate API key for a WebBroker API
+	// (POST /webbroker-apis/{id}/api-keys/{apiKeyName}/regenerate)
+	RegenerateWebBrokerAPIKey(c *gin.Context, id string, apiKeyName string)
 	// List all WebSubAPIs
 	// (GET /websub-apis)
 	ListWebSubAPIs(c *gin.Context, params ListWebSubAPIsParams)
@@ -4422,6 +4446,163 @@ func (siw *ServerInterfaceWrapper) GetWebBrokerApiById(c *gin.Context) {
 	siw.Handler.GetWebBrokerApiById(c, id)
 }
 
+// ListWebBrokerAPIKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListWebBrokerAPIKeys(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BasicAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListWebBrokerAPIKeys(c, id)
+}
+
+// CreateWebBrokerAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebBrokerAPIKey(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BasicAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateWebBrokerAPIKey(c, id)
+}
+
+// RevokeWebBrokerAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeWebBrokerAPIKey(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "apiKeyName" -------------
+	var apiKeyName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "apiKeyName", c.Param("apiKeyName"), &apiKeyName, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter apiKeyName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BasicAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RevokeWebBrokerAPIKey(c, id, apiKeyName)
+}
+
+// UpdateWebBrokerAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWebBrokerAPIKey(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "apiKeyName" -------------
+	var apiKeyName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "apiKeyName", c.Param("apiKeyName"), &apiKeyName, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter apiKeyName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BasicAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateWebBrokerAPIKey(c, id, apiKeyName)
+}
+
+// RegenerateWebBrokerAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) RegenerateWebBrokerAPIKey(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "apiKeyName" -------------
+	var apiKeyName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "apiKeyName", c.Param("apiKeyName"), &apiKeyName, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter apiKeyName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(BasicAuthScopes, []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RegenerateWebBrokerAPIKey(c, id, apiKeyName)
+}
+
 // ListWebSubAPIs operation middleware
 func (siw *ServerInterfaceWrapper) ListWebSubAPIs(c *gin.Context) {
 
@@ -4814,6 +4995,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/webbroker-apis", wrapper.CreateWebBrokerApi)
 	router.DELETE(options.BaseURL+"/webbroker-apis/:id", wrapper.DeleteWebBrokerApiById)
 	router.GET(options.BaseURL+"/webbroker-apis/:id", wrapper.GetWebBrokerApiById)
+	router.GET(options.BaseURL+"/webbroker-apis/:id/api-keys", wrapper.ListWebBrokerAPIKeys)
+	router.POST(options.BaseURL+"/webbroker-apis/:id/api-keys", wrapper.CreateWebBrokerAPIKey)
+	router.DELETE(options.BaseURL+"/webbroker-apis/:id/api-keys/:apiKeyName", wrapper.RevokeWebBrokerAPIKey)
+	router.PUT(options.BaseURL+"/webbroker-apis/:id/api-keys/:apiKeyName", wrapper.UpdateWebBrokerAPIKey)
+	router.POST(options.BaseURL+"/webbroker-apis/:id/api-keys/:apiKeyName/regenerate", wrapper.RegenerateWebBrokerAPIKey)
 	router.GET(options.BaseURL+"/websub-apis", wrapper.ListWebSubAPIs)
 	router.POST(options.BaseURL+"/websub-apis", wrapper.CreateWebSubAPI)
 	router.DELETE(options.BaseURL+"/websub-apis/:id", wrapper.DeleteWebSubAPI)
@@ -5068,19 +5254,23 @@ var swaggerSpec = []string{
 	"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",
-	"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",
+	"1VrdTIdi2f5SBqI1Ca0tUiJUtr/JIKs6oNYYo+tGOJnVrRt/z2APNGXd1GC/14n6rRHHcaov0Ly3JCU8",
+	"f9uKLFR18uDNRTbRxaKglq39LN4MC69JT4vsrqxzZ4tCROvFDPnSPheVPLem3S5yUqFxoWCrs7l8mbBp",
+	"grFpgvFaFSwrJPLrxFG2vFhOIhkSE4E0/ii9u729Zp06FqosphlvK9i8Y5Fifanie7buHRnQNFCbth0b",
+	"GbxGVnFBSCzHHF52V48/nYRKKm8sUUJtunxsuny8pqQt6/exMXxf2o5kxaze5vqRTA+yrFZXkj+hpZ3s",
+	"9JvQZZtuJJtuJM1qt7VpT7IM/UHjQb283Mt40ExSrsD7E6uTnavmnCk19zIeVOfl/oQgGyFivLvQdFwN",
+	"z3JzcY2JFb53lKhPZ995lJhw0AOn6RJA1OeLSQo28nnfalqwpOF6OcEHy84J1gy26gnBqSAwRKAm8EWm",
+	"AsuJ83nA5Yd1arcXlosrx28sETc/3LKzcDVzWFW5wv0m/3aG/FvNE28r+Tbhqua4P2f+zJRzqwhzhoTb",
+	"ZAEvdT71qkvTbLVOT9e2Btm1VqBrJ9Wq7XjNjNoqEF7BCVLgrE8u7QIYfFoWrcLR1BRa+V5T+bNqUWvC",
+	"tXW1dyNWyDTWerVU2bXgJpUna1C117S1XPNqfApFvXvxC1KP8rxgmYz2Rg3+7rIN/pU6vFvJIOdaSKQq",
+	"0bBwU/5Fmfsanppp+3JJDeXsGxJsesL+GpoN65Onr3di3ZP00yD3y1iugfT8EsZa39z8hPWb5fypWfnr",
+	"ZcZskvE3yfgvE7ubhKQmM/EXoBEqbbDVTMBfgOxehox+Qca9hmiTcb8RtCnDr1GaTGnm/WJs3FfIuX/j",
+	"QsmSZL9wobRJst8k2a+ccN0YtI1l2L+qNdtoYn1VeGTlsurfvPlsTaNfW221SaPfpNG/beegPId+ERqC",
+	"T47cmPhsImSe+Ow4ZqPW0c+3nJUlrDaB+Bm7MADqBEtM3G7FJGgdtUaMRUc7OwF/YYQpOzrsHna54tkZ",
+	"J1DuPHQ7h62iHDvF7j0iO5/iASIhYogaqdf5CVQbeYdvH8FBgEjFTLcJ2gpNfy+uT0GiIuSRg64YTlNx",
+	"aCsiXoTfNtj5Sb9P8JOPjNHOT/qA/zipHk4+1F7Z1edL4CLCFQ+3fuToP1xd9S9BHMmCveABEflYpt2r",
+	"6U7Sr2aH//Pncw7rg+8hAq7QOAr4MBmGN1Zmf/tlk9aaa94pnibTxp+2S7bBVfPydCxLN/Pn2+f/HwAA",
+	"///4En79BTwCAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

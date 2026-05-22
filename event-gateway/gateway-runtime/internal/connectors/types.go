@@ -50,8 +50,7 @@ type MessageProcessor interface {
 	ProcessOutbound(ctx context.Context, bindingName string, msg *Message) (*Message, bool, error)
 
 	// Protocol mediation policy enforcement points (WebBrokerApi)
-	ProcessConnectionInitRequest(ctx context.Context, bindingName string, msg *Message) (*Message, bool, error)
-	ProcessConnectionInitResponse(ctx context.Context, bindingName string, msg *Message) (*Message, error)
+	ProcessConnectionInit(ctx context.Context, bindingName string, msg *Message) (*Message, bool, error)
 	ProcessProduce(ctx context.Context, bindingName string, msg *Message) (*Message, bool, error)
 	ProcessConsume(ctx context.Context, bindingName string, msg *Message) (*Message, bool, error)
 
@@ -66,7 +65,7 @@ type BrokerDriver interface {
 	SubscribeManual(groupID string, topics []string, handler MessageHandler) (Receiver, error)
 	Replay(ctx context.Context, topic string, handler MessageHandler) error
 	TopicExists(ctx context.Context, topic string) (bool, error)
-	EnsureTopics(ctx context.Context, topics []string) error
+	EnsureTopics(ctx context.Context, topics []string, metadata map[string]map[string]string) error
 	EnsureCompactedTopic(ctx context.Context, topic string) error
 	DeleteTopics(ctx context.Context, topics []string) error
 	Close() error

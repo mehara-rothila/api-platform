@@ -19,6 +19,7 @@
 package binding
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"path"
 	"strings"
@@ -78,11 +79,11 @@ type WebBrokerApiBinding struct {
 
 // WebBrokerChannelDef defines a single channel within a WebBrokerApi with its policies.
 type WebBrokerChannelDef struct {
-	ProduceTo        *TopicMapping          `yaml:"produce_to,omitempty"`
-	ConsumeFrom      *TopicMapping          `yaml:"consume_from,omitempty"`
-	OnConnectionInit ConnectionInitPolicies `yaml:"on_connection_init"`
-	OnProduce        []PolicyRef            `yaml:"on_produce"`
-	OnConsume        []PolicyRef            `yaml:"on_consume"`
+	ProduceTo        *TopicMapping `yaml:"produce_to,omitempty"`
+	ConsumeFrom      *TopicMapping `yaml:"consume_from,omitempty"`
+	OnConnectionInit []PolicyRef   `yaml:"on_connection_init"`
+	OnProduce        []PolicyRef   `yaml:"on_produce"`
+	OnConsume        []PolicyRef   `yaml:"on_consume"`
 }
 
 // TopicMapping defines a Kafka topic mapping
@@ -92,15 +93,9 @@ type TopicMapping struct {
 
 // ProtocolMediationPolicies defines policy enforcement points for protocol mediation.
 type ProtocolMediationPolicies struct {
-	OnConnectionInit ConnectionInitPolicies `yaml:"on_connection_init"`
-	OnProduce        []PolicyRef            `yaml:"on_produce"`
-	OnConsume        []PolicyRef            `yaml:"on_consume"`
-}
-
-// ConnectionInitPolicies defines policies for the connection handshake phase.
-type ConnectionInitPolicies struct {
-	Request  []PolicyRef `yaml:"request"`
-	Response []PolicyRef `yaml:"response"`
+	OnConnectionInit []PolicyRef `yaml:"on_connection_init"`
+	OnProduce        []PolicyRef `yaml:"on_produce"`
+	OnConsume        []PolicyRef `yaml:"on_consume"`
 }
 
 // ReceiverSpec defines the receiver connector type and configuration.
@@ -146,18 +141,22 @@ type ChannelsConfig struct {
 	Channels []Binding `yaml:"channels"`
 }
 
-// JoinNormalizedTopic derives a Kafka topic name by normalizing each logical
-// segment and joining them with underscores.
+// JoinNormalizedTopic derives a Kafka topic name by hashing the parts joined with underscores.
+// Each part is written as `<length>:<value>|` to ensure uniqueness and prevent collisions.
+// eg: "my-api", "v1", "/orders" -> "6:my-api|2:v1|7:/orders|" -> SHA-256 hash of that string.
+// Returns the SHA-256 hash of the joined string.
 func JoinNormalizedTopic(parts ...string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-
-	normalizedParts := make([]string, 0, len(parts))
+	var joined strings.Builder
 	for _, part := range parts {
-		normalizedParts = append(normalizedParts, NormalizeTopicSegment(part))
+		fmt.Fprintf(&joined, "%d:%s|", len(part), part)
 	}
-	return strings.Join(normalizedParts, "_")
+	// Calculate SHA-256 hash
+	hash := sha256.Sum256([]byte(joined.String()))
+	// Return hex-encoded hash
+	return fmt.Sprintf("%x", hash)
 }
 
 // WebSubApiTopicName derives a Kafka topic name for a WebSubApi channel.
