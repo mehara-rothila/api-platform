@@ -2058,19 +2058,21 @@ func TestResolvePerOpUpstream_WithRef(t *testing.T) {
 	assert.Equal(t, "user-svc:8080", parsedURL.Host)
 }
 
-// TestResolvePerOpUpstream_DedupSameURL asserts that identical URLs produce
-// identical cluster names (dedup foundation for the caller's idempotent registration map).
+// TestResolvePerOpUpstream_DedupSameURL asserts that the cluster name does not
+// depend on the upstream URL. Two distinct URLs that share the same apiID,
+// method, path, and env must resolve to the same cluster name so URL edits
+// become EDS endpoint updates instead of CDS cluster recreates.
 func TestResolvePerOpUpstream_DedupSameURL(t *testing.T) {
 	translator := &Translator{}
 	a := &api.Upstream{Url: strPtr("http://shared-svc:8080")}
-	b := &api.Upstream{Url: strPtr("http://shared-svc:8080")}
+	b := &api.Upstream{Url: strPtr("http://shared-svc:8081")}
 
 	nameA, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", a, nil)
 	require.NoError(t, err)
 	nameB, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", b, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, nameA, nameB, "identical URLs must produce identical cluster names")
+	assert.Equal(t, nameA, nameB, "cluster name must not depend on URL — same apiID|method|path|env must produce same cluster")
 }
 
 // TestResolvePerOpUpstream_DistinctEnvs — distinct env labels never collide on

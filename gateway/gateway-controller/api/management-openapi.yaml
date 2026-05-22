@@ -4138,7 +4138,10 @@ components:
 
     OperationUpstream:
       type: object
-      description: Per-operation upstream override. Missing sub-fields fall back to API-level upstream.
+      description: Per-operation upstream override. Missing sub-fields fall back to API-level upstream. At least one of main or sandbox must be set.
+      anyOf:
+        - required: [main]
+        - required: [sandbox]
       properties:
         main:
           $ref: "#/components/schemas/Upstream"
