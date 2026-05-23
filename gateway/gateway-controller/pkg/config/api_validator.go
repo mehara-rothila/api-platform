@@ -628,7 +628,7 @@ func (v *APIValidator) validateOperationUpstream(opIdx int, up *api.OperationUps
 			if strings.HasPrefix(errs[i].Field, oldPrefix) {
 				errs[i].Field = newPrefix + strings.TrimPrefix(errs[i].Field, oldPrefix)
 			}
-			// else: leave the field untouched — do not mangle unexpected prefixes
+			// else: leave the field untouched - do not mangle unexpected prefixes
 		}
 		return errs
 	}

@@ -210,7 +210,7 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 		vhosts := []string{effectiveMainVHost}
 		if hasSandbox {
-			// Only add sandbox vhost when this specific op has sandbox config —
+			// Only add sandbox vhost when this specific op has sandbox config -
 			// either via API-level sandbox fallback OR a per-op sandbox override.
 			// Without this guard, ops with no sandbox config would get a sandbox
 			// route silently pointing to the main cluster (placeholder default).
@@ -468,7 +468,7 @@ func (t *RestAPITransformer) addPerOpUpstreamCluster(
 
 	if _, exists := rdc.UpstreamClusters[clusterKey]; !exists {
 		rdc.UpstreamClusters[clusterKey] = &models.UpstreamCluster{
-			BasePath:       basePath,
+			BasePath: basePath,
 			Endpoints: []models.Endpoint{{
 				Host: parsedURL.Hostname(),
 				Port: port,

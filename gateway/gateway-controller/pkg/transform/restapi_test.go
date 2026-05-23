@@ -152,7 +152,7 @@ func TestRestAPITransformer_OperationLevelEmptyVersionResolvesToLatest(t *testin
 // TestRestAPITransformer_UnknownPolicySkipped verifies that a policy not present in
 // the definitions is silently excluded from the policy chain without causing an error.
 func TestRestAPITransformer_UnknownPolicySkipped(t *testing.T) {
-	defs := map[string]models.PolicyDefinition{} // empty — policy won't resolve
+	defs := map[string]models.PolicyDefinition{} // empty - policy won't resolve
 
 	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, defs)
 	cfg := makeRestAPIStoredConfig(
@@ -437,10 +437,10 @@ func TestRestAPITransformer_PerOpBothOverrideBothVhosts(t *testing.T) {
 	assert.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "op_"))
 	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "op_"))
 	assert.NotEqual(t, mainRoute.Upstream.ClusterKey, sandboxRoute.Upstream.ClusterKey,
-		"distinct per-op URLs must produce distinct cluster keys")
+		"main and sandbox per-op vhosts must produce distinct cluster keys (env differs)")
 }
 
-// TestRestAPITransformer_NoPerOpUsesAPILevelClusters — regression — without per-op
+// TestRestAPITransformer_NoPerOpUsesAPILevelClusters - regression - without per-op
 // upstream the routes still use the API-level main/sandbox clusters.
 func TestRestAPITransformer_NoPerOpUsesAPILevelClusters(t *testing.T) {
 	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
@@ -491,9 +491,10 @@ func TestRestAPITransformer_PerOpDistinctOpsSameURL(t *testing.T) {
 	assert.Equal(t, 2, opCount, "two distinct ops with same URL should produce two clusters under per-op naming")
 }
 
-// TestRestAPITransformer_PerOpDistinctURLs asserts that distinct backend URLs produce
-// distinct per-op cluster entries (no false dedup).
-func TestRestAPITransformer_PerOpDistinctURLs(t *testing.T) {
+// TestRestAPITransformer_PerOpSameOpDifferentURLsDedup asserts that two operations with
+// identical (method, path, env) but different backend URLs collapse into a single per-op
+// cluster, because URL is intentionally excluded from the hash (EDS-stable design).
+func TestRestAPITransformer_PerOpSameOpDifferentURLsDedup(t *testing.T) {
 	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
 	cfg := makeRestAPIWithOps([]api.Operation{
 		{
@@ -503,9 +504,9 @@ func TestRestAPITransformer_PerOpDistinctURLs(t *testing.T) {
 			},
 		},
 		{
-			Method: "POST", Path: "/orders",
+			Method: "GET", Path: "/users",
 			Upstream: &api.OperationUpstream{
-				Main: &api.Upstream{Url: ptrStr("http://order-svc:9090")},
+				Main: &api.Upstream{Url: ptrStr("http://user-svc:9090")},
 			},
 		},
 	})
@@ -519,7 +520,8 @@ func TestRestAPITransformer_PerOpDistinctURLs(t *testing.T) {
 			opCount++
 		}
 	}
-	assert.Equal(t, 2, opCount, "distinct URLs must produce distinct per-op clusters")
+	assert.Equal(t, 1, opCount,
+		"identical (method, path, env) must collapse to one cluster regardless of URL difference (URL excluded from hash)")
 }
 
 // TestRestAPITransformer_PerOpClusterIsolatedAcrossAPIs asserts that two APIs with the
@@ -570,7 +572,7 @@ func TestRestAPITransformer_PerOpClusterIsolatedAcrossAPIs(t *testing.T) {
 	assert.NotEqual(t, keyA, keyB, "same URL across different APIs must produce different per-op cluster keys")
 }
 
-// TestRestAPITransformer_PerOpSandboxWithoutAPILevelSandbox — guard regression.
+// TestRestAPITransformer_PerOpSandboxWithoutAPILevelSandbox - guard regression.
 // API-level Sandbox is nil, but one op declares a per-op sandbox upstream. The
 // sandbox vhost must be created only for that op; ops without per-op sandbox
 // must NOT get a sandbox route (otherwise they'd silently route to the main
@@ -632,7 +634,7 @@ func TestRestAPITransformer_PerOpSandboxWithoutAPILevelSandbox(t *testing.T) {
 		"op without per-op sandbox must NOT get a sandbox route when API-level sandbox is nil")
 }
 
-// TestRestAPITransformer_PerOpMainSandboxSameURL — when Main and Sandbox
+// TestRestAPITransformer_PerOpMainSandboxSameURL - when Main and Sandbox
 // sub-fields of the same operation point at the same URL, they still get separate
 // clusters because the env label ("main" vs "sandbox") differs.
 func TestRestAPITransformer_PerOpMainSandboxSameURL(t *testing.T) {
@@ -727,7 +729,7 @@ func TestResolvePort(t *testing.T) {
 	}
 }
 
-// TestRestAPITransformer_PerOpRefPropagatesConnectTimeout — when a per-op upstream
+// TestRestAPITransformer_PerOpRefPropagatesConnectTimeout - when a per-op upstream
 // uses a ref to an upstreamDefinition that has a connect timeout, the timeout must
 // flow into the resulting per-op UpstreamCluster.ConnectTimeout field. Without this,
 // per-op clusters built from refs would silently drop the timeout configured on the
@@ -792,3 +794,4 @@ func TestRestAPITransformer_PerOpRefPropagatesConnectTimeout(t *testing.T) {
 	assert.Equal(t, 7*time.Second, *cluster.ConnectTimeout,
 		"ConnectTimeout should be 7s (parsed from the definition's '7s')")
 }
+

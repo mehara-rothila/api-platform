@@ -109,4 +109,4 @@ type UpstreamTLS struct {
 // ConfigTransformer transforms a StoredConfig into a RuntimeDeployConfig.
 type ConfigTransformer interface {
 	Transform(cfg *StoredConfig) (*RuntimeDeployConfig, error)
-} 
+}

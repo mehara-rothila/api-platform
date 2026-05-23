@@ -116,7 +116,10 @@ parent:
 //   - deterministic for identical inputs
 //   - distinct on any input field (apiID, method, path, env)
 //   - case-insensitive on method (uppercased before hashing)
-//   - the URL is NOT a hash input (so URL edits become EDS updates, not CDS rebuilds)
+//
+// The URL-independence contract (URL changes must not alter the cluster key) is
+// asserted end-to-end at the xds layer where the cluster name is actually emitted;
+// see pkg/xds/translator_test.go TestResolvePerOpUpstream_DedupSameURL.
 func TestPerOpClusterKey(t *testing.T) {
 	t.Run("deterministic for identical inputs", func(t *testing.T) {
 		a := PerOpClusterKey("api-1", "GET", "/users", "main")
@@ -157,16 +160,4 @@ func TestPerOpClusterKey(t *testing.T) {
 		assert.NotEqual(t, a, b)
 	})
 
-	t.Run("URL is NOT a hash input (EDS-stable cluster naming)", func(t *testing.T) {
-		// The whole point of the hash design: the URL is deliberately excluded
-		// so an upstream URL change becomes an EDS endpoint update (no connection
-		// drain), not a CDS cluster recreate. PerOpClusterKey takes 4 args; URL
-		// is not one of them. This test pins that contract at the API surface —
-		// if someone ever adds a URL parameter, the function signature changes
-		// and this test must change with it, forcing a deliberate decision.
-		a := PerOpClusterKey("api-1", "GET", "/users", "main")
-		b := PerOpClusterKey("api-1", "GET", "/users", "main")
-		assert.Equal(t, a, b,
-			"same (apiID, method, path, env) must produce same hash regardless of any external URL")
-	})
 }

@@ -228,7 +228,7 @@ func TestDerivePolicyFromAPIConfig_OperationLevelEmptyVersionResolvesToLatest(t 
 // TestDerivePolicyFromAPIConfig_UnknownPolicySkipped verifies that a policy not present
 // in the definitions is silently skipped and does not cause a panic or error.
 func TestDerivePolicyFromAPIConfig_UnknownPolicySkipped(t *testing.T) {
-	defs := map[string]models.PolicyDefinition{} // empty — policy won't be found
+	defs := map[string]models.PolicyDefinition{} // empty - policy won't be found
 
 	apiConfig := api.RestAPI{
 		Kind:     api.RestAPIKindRestApi,
@@ -257,7 +257,7 @@ func TestDerivePolicyFromAPIConfig_UnknownPolicySkipped(t *testing.T) {
 	assert.Nil(t, result, "expected nil result when all policies are unresolvable")
 }
 
-// TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox — when an API has NO
+// TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox - when an API has NO
 // API-level sandbox but an operation declares a per-op sandbox upstream, the policy
 // builder must still emit a sandbox policy chain for that operation so the sandbox
 // route created by the transformer gets policies attached. Without this, sandbox

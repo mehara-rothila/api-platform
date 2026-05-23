@@ -2033,7 +2033,7 @@ func TestResolvePerOpUpstream_WithDirectURL(t *testing.T) {
 }
 
 // TestResolvePerOpUpstream_WithRef asserts that a ref resolves through
-// upstreamDefinitions and produces a hash-named cluster derived from the resolved URL (legacy path).
+// upstreamDefinitions and produces a hash-named cluster keyed by apiID|method|path|env.
 func TestResolvePerOpUpstream_WithRef(t *testing.T) {
 	translator := &Translator{}
 	ref := "user-svc-cluster"
@@ -2072,10 +2072,10 @@ func TestResolvePerOpUpstream_DedupSameURL(t *testing.T) {
 	nameB, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", b, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, nameA, nameB, "cluster name must not depend on URL — same apiID|method|path|env must produce same cluster")
+	assert.Equal(t, nameA, nameB, "cluster name must not depend on URL - same apiID|method|path|env must produce same cluster")
 }
 
-// TestResolvePerOpUpstream_DistinctEnvs — distinct env labels never collide on
+// TestResolvePerOpUpstream_DistinctEnvs - distinct env labels never collide on
 // the cluster name (proves the hash input includes the env).
 func TestResolvePerOpUpstream_DistinctEnvs(t *testing.T) {
 	translator := &Translator{}
@@ -2090,7 +2090,7 @@ func TestResolvePerOpUpstream_DistinctEnvs(t *testing.T) {
 	assert.NotEqual(t, nameA, nameB, "distinct envs must produce distinct cluster names")
 }
 
-// TestResolvePerOpUpstream_InvalidURL — invalid scheme is rejected.
+// TestResolvePerOpUpstream_InvalidURL - invalid scheme is rejected.
 func TestResolvePerOpUpstream_InvalidURL(t *testing.T) {
 	translator := &Translator{}
 	upstream := &api.Upstream{Url: strPtr("ftp://bad-scheme:8080")}
@@ -2100,7 +2100,7 @@ func TestResolvePerOpUpstream_InvalidURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "http/https")
 }
 
-// TestResolvePerOpUpstream_RefWithNilDefinitions — ref-based per-op with no
+// TestResolvePerOpUpstream_RefWithNilDefinitions - ref-based per-op with no
 // upstreamDefinitions slice at all. Must return a clean error, not panic on the
 // nil dereference.
 func TestResolvePerOpUpstream_RefWithNilDefinitions(t *testing.T) {
@@ -2110,10 +2110,10 @@ func TestResolvePerOpUpstream_RefWithNilDefinitions(t *testing.T) {
 
 	_, _, _, err := translator.resolvePerOpUpstream("test-api", "GET", "/users", "main", upstream, nil)
 	require.Error(t, err)
-	// The exact message is not pinned — only that an error is returned and the call does not panic on nil upstreamDefinitions.
+	// The exact message is not pinned - only that an error is returned and the call does not panic on nil upstreamDefinitions.
 }
 
-// TestResolvePerOpUpstream_UnknownRef — ref points at a definition that's not
+// TestResolvePerOpUpstream_UnknownRef - ref points at a definition that's not
 // in the upstreamDefinitions slice. Must return an error, not silently use a
 // default upstream.
 func TestResolvePerOpUpstream_UnknownRef(t *testing.T) {
@@ -2136,7 +2136,7 @@ func TestResolvePerOpUpstream_UnknownRef(t *testing.T) {
 	require.Error(t, err, "ref to non-existent definition must error")
 }
 
-// TestResolvePerOpUpstream_WhitespaceURL — URL that's only whitespace after
+// TestResolvePerOpUpstream_WhitespaceURL - URL that's only whitespace after
 // trimming must be treated as missing, not used verbatim. Otherwise the cluster
 // would be built from an invalid URL.
 func TestResolvePerOpUpstream_WhitespaceURL(t *testing.T) {

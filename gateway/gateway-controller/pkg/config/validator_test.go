@@ -962,7 +962,7 @@ func TestValidateOperationUpstream_EmptyWrapper(t *testing.T) {
 func TestValidateOperationUpstream_EmptyLeaf(t *testing.T) {
 	validator := NewAPIValidator()
 	up := &api.OperationUpstream{
-		Main: &api.Upstream{}, // empty leaf — no url, no ref
+		Main: &api.Upstream{}, // empty leaf - no url, no ref
 	}
 
 	errors := validator.validateOperationUpstream(0, up, nil)
