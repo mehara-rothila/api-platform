@@ -161,3 +161,43 @@ func TestPerOpClusterKey(t *testing.T) {
 	})
 
 }
+
+// TestAPILevelClusterKey validates the contract for API-level cluster naming:
+//   - deterministic for identical inputs
+//   - distinct on any input field (apiID, env)
+//   - same hash family as PerOpClusterKey (16 hex chars from SHA-256[:8])
+//
+// The URL-independence contract is asserted end-to-end at the xds layer where
+// the cluster name is actually emitted.
+func TestAPILevelClusterKey(t *testing.T) {
+	t.Run("deterministic for identical inputs", func(t *testing.T) {
+		a := APILevelClusterKey("api-1", "main")
+		b := APILevelClusterKey("api-1", "main")
+		assert.Equal(t, a, b, "same inputs must produce same hash")
+		assert.Len(t, a, 16, "hash must be 16 hex chars (8 bytes of SHA-256)")
+	})
+
+	t.Run("different apiID produces different hash", func(t *testing.T) {
+		a := APILevelClusterKey("api-1", "main")
+		b := APILevelClusterKey("api-2", "main")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("different env produces different hash", func(t *testing.T) {
+		a := APILevelClusterKey("api-1", "main")
+		b := APILevelClusterKey("api-1", "sandbox")
+		assert.NotEqual(t, a, b)
+	})
+
+	t.Run("does not collide with PerOpClusterKey for same apiID and env", func(t *testing.T) {
+		// Distinct algorithms (different hash inputs) so the hex tails should
+		// almost certainly differ. This is a sanity check; callers also add
+		// different prefixes ("main_" vs "op_") so full cluster names cannot
+		// collide regardless.
+		apiLevel := APILevelClusterKey("api-1", "main")
+		perOp := PerOpClusterKey("api-1", "GET", "/users", "main")
+		assert.NotEqual(t, apiLevel, perOp,
+			"API-level and per-op hashes for the same apiID/env must differ "+
+				"because per-op also folds method and path into the input")
+	})
+}

@@ -770,7 +770,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 	clusters := []*cluster.Cluster{}
 
 	// -------- MAIN UPSTREAM --------
-	mainClusterName, parsedMainURL, mainTimeout, err := t.resolveUpstreamCluster("main", &apiData.Upstream.Main, apiData.UpstreamDefinitions)
+	mainClusterName, parsedMainURL, mainTimeout, err := t.resolveUpstreamCluster(cfg.UUID, "main", &apiData.Upstream.Main, apiData.UpstreamDefinitions)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -830,7 +830,9 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 		useClusterHeader := apiData.UpstreamDefinitions != nil && len(*apiData.UpstreamDefinitions) > 0
 		defaultCluster := ""
 		if useClusterHeader {
-			// Default to the main cluster (with the upstream_ prefix for cluster_header lookup)
+			// Default to the main cluster name (the EDS-stable hashed name)
+			// so the policy engine's x-target-upstream header resolves to a
+			// real cluster.
 			defaultCluster = mainClusterName
 		}
 
@@ -888,7 +890,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 		var sbRouteHostRewrite *api.UpstreamHostRewrite
 
 		if apiData.Upstream.Sandbox != nil {
-			sbClusterName, parsedSbURL, sbTimeout, err = t.resolveUpstreamCluster("sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
+			sbClusterName, parsedSbURL, sbTimeout, err = t.resolveUpstreamCluster(cfg.UUID, "sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1002,7 +1004,10 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 
 // resolveUpstreamCluster validates an upstream (main or sandbox) and creates its cluster.
 // Returns clusterName, parsedURL, timeout (can be nil), and error.
-func (t *Translator) resolveUpstreamCluster(upstreamName string, up *api.Upstream, upstreamDefinitions *[]api.UpstreamDefinition) (string, *url.URL, *resolvedTimeout, error) {
+// The cluster name is derived from sha256(apiID|upstreamName), giving the
+// API-level main/sandbox cluster an EDS-stable identity: URL edits update
+// endpoints in-place rather than destroying and recreating the cluster.
+func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.Upstream, upstreamDefinitions *[]api.UpstreamDefinition) (string, *url.URL, *resolvedTimeout, error) {
 	var rawURL string
 	var timeout *resolvedTimeout
 
@@ -1048,8 +1053,8 @@ func (t *Translator) resolveUpstreamCluster(upstreamName string, up *api.Upstrea
 		return "", nil, nil, fmt.Errorf("invalid %s upstream URL: must include host and http/https scheme", upstreamName)
 	}
 
-	// Generate cluster name
-	clusterName := t.sanitizeClusterName(parsedURL.Host, parsedURL.Scheme)
+	// Generate cluster name from EDS-stable hash (URL intentionally excluded).
+	clusterName := upstreamName + "_" + apiLevelClusterKeyHash(apiID, upstreamName)
 
 	return clusterName, parsedURL, timeout, nil
 }
@@ -1104,6 +1109,15 @@ func (t *Translator) resolvePerOpUpstream(apiID string, method string, path stri
 // cannot import utils). Keep in sync with utils.PerOpClusterKey.
 func perOpClusterKeyHash(apiID, method, path, env string) string {
 	hashInput := apiID + "|" + strings.ToUpper(method) + "|" + path + "|" + env
+	sum := sha256.Sum256([]byte(hashInput))
+	return hex.EncodeToString(sum[:8])
+}
+
+// apiLevelClusterKeyHash mirrors utils.APILevelClusterKey but lives in this
+// package to avoid the same import cycle described above. Keep in sync with
+// utils.APILevelClusterKey.
+func apiLevelClusterKeyHash(apiID, env string) string {
+	hashInput := apiID + "|" + env
 	sum := sha256.Sum256([]byte(hashInput))
 	return hex.EncodeToString(sum[:8])
 }
@@ -2832,14 +2846,6 @@ func (t *Translator) pathToRegex(path string) string {
 
 	// Anchor the regex to match the entire path
 	return "^" + regex + "$"
-}
-
-// sanitizeClusterName creates a valid cluster name from a hostname and scheme
-func (t *Translator) sanitizeClusterName(hostname, scheme string) string {
-	name := strings.ReplaceAll(hostname, ".", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	// Include scheme to differentiate HTTP and HTTPS clusters for the same host
-	return "cluster_" + scheme + "_" + name
 }
 
 // sanitizeUpstreamDefinitionName sanitizes an upstream definition name for use in Envoy cluster names.

@@ -366,9 +366,11 @@ func (t *RestAPITransformer) buildPolicyChain(
 type upstreamClusterResult struct {
 	// ClusterKey is the internal key used in rdc.UpstreamClusters.
 	ClusterKey string
-	// EnvoyClusterName is the Envoy cluster name matching pkg/xds/translator.go's
-	// sanitizeClusterName format ("cluster_<scheme>_<sanitized_host>").
-	// This is the value Envoy knows the cluster by, so PE must use it for x-target-upstream.
+	// EnvoyClusterName is the Envoy cluster name. For API-level upstreams it is
+	// the EDS-stable hashed name "<env>_<16-hex>" (matching ClusterKey). For
+	// per-op upstreams it is empty because the route resolves the cluster via
+	// ClusterKey directly. This is the value Envoy knows the cluster by, so the
+	// policy engine must use it for the x-target-upstream header.
 	EnvoyClusterName string
 	// BasePath is the URL path component of the upstream (e.g. "/anything/foo").
 	BasePath string
@@ -400,7 +402,11 @@ func (t *RestAPITransformer) addUpstreamCluster(
 		basePath = "/"
 	}
 
-	clusterKey := fmt.Sprintf("upstream_%s_%s_%d", upstreamName, parsedURL.Hostname(), port)
+	// EDS-stable cluster naming: derived from sha256(apiID|env) so URL edits
+	// propagate as endpoint updates rather than cluster recreates. ClusterKey and
+	// EnvoyClusterName are intentionally the same string so the policy engine's
+	// `default_upstream_cluster` metadata points at the actual Envoy cluster.
+	clusterKey := upstreamName + "_" + utils.APILevelClusterKey(rdc.Metadata.UUID, upstreamName)
 
 	rdc.UpstreamClusters[clusterKey] = &models.UpstreamCluster{
 		BasePath: basePath,
@@ -413,7 +419,7 @@ func (t *RestAPITransformer) addUpstreamCluster(
 
 	return &upstreamClusterResult{
 		ClusterKey:       clusterKey,
-		EnvoyClusterName: sanitizeEnvoyClusterName(parsedURL.Host, parsedURL.Scheme),
+		EnvoyClusterName: clusterKey,
 		BasePath:         basePath,
 	}, nil
 }
@@ -483,14 +489,6 @@ func (t *RestAPITransformer) addPerOpUpstreamCluster(
 		EnvoyClusterName: "",
 		BasePath:         basePath,
 	}, nil
-}
-
-// sanitizeEnvoyClusterName computes the Envoy cluster name from a URL host and scheme,
-// matching the sanitizeClusterName logic in pkg/xds/translator.go.
-func sanitizeEnvoyClusterName(host, scheme string) string {
-	name := strings.ReplaceAll(host, ".", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	return "cluster_" + scheme + "_" + name
 }
 
 // resolveUpstreamURL resolves the URL from an upstream (direct URL or ref).

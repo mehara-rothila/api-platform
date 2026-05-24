@@ -142,6 +142,7 @@ func getFeaturePaths() []string {
 		"features/route-path-matching.feature",
 		"features/secrets.feature",
 		"features/template-functions.feature",
+		"features/api-level-eds-stable.feature",
 		// These tests require different gateway configurations and are not included in the default suite run.
 		// "features/vhost-routing-single.feature", // cd it && make test-vhosts-single
 		// "features/vhost-routing-multi.feature", // cd it && make test-vhosts-multi

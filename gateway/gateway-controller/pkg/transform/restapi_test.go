@@ -29,6 +29,7 @@ import (
 	api "github.com/wso2/api-platform/gateway/gateway-controller/pkg/api/management"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/config"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/models"
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils"
 )
 
 // ptrStr is a helper to get a pointer to a string literal.
@@ -793,5 +794,114 @@ func TestRestAPITransformer_PerOpRefPropagatesConnectTimeout(t *testing.T) {
 		"per-op cluster built from ref must inherit ConnectTimeout from the upstreamDefinition")
 	assert.Equal(t, 7*time.Second, *cluster.ConnectTimeout,
 		"ConnectTimeout should be 7s (parsed from the definition's '7s')")
+}
+
+// TestRestAPITransformer_APILevelClusterNameShape asserts the EDS-stable cluster
+// naming contract for API-level main and sandbox upstreams:
+//   - cluster names are "<env>_<16-hex>" derived from sha256(apiID|env)
+//   - ClusterKey and EnvoyClusterName are the SAME string (so the policy engine's
+//     default_upstream_cluster metadata resolves to a real Envoy cluster)
+func TestRestAPITransformer_APILevelClusterNameShape(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{Method: "GET", Path: "/users"},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	expectedMain := "main_" + utils.APILevelClusterKey(cfg.UUID, "main")
+	expectedSandbox := "sandbox_" + utils.APILevelClusterKey(cfg.UUID, "sandbox")
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute, "main route must exist")
+	assert.Equal(t, expectedMain, mainRoute.Upstream.ClusterKey,
+		"main cluster name should be <env>_<hash> derived from apiID|env")
+
+	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
+	require.NotNil(t, sandboxRoute, "sandbox route must exist")
+	assert.Equal(t, expectedSandbox, sandboxRoute.Upstream.ClusterKey,
+		"sandbox cluster name should be <env>_<hash> derived from apiID|env")
+
+	_, mainExists := rdc.UpstreamClusters[expectedMain]
+	require.True(t, mainExists, "main cluster %q must be registered in UpstreamClusters", expectedMain)
+	_, sandboxExists := rdc.UpstreamClusters[expectedSandbox]
+	require.True(t, sandboxExists, "sandbox cluster %q must be registered in UpstreamClusters", expectedSandbox)
+}
+
+// TestRestAPITransformer_APILevelDefaultClusterMatchesRealCluster is a regression
+// guard for a latent 503 NoRoute bug. The policy engine reads
+// route.Upstream.DefaultCluster and writes it into the x-target-upstream header
+// when the default upstream path is taken. Envoy then looks up the cluster by
+// that header value. If DefaultCluster does not match a registered cluster
+// name, Envoy returns 503 NR.
+//
+// Previously DefaultCluster was sanitizeEnvoyClusterName(host, scheme) while the
+// real cluster was registered as "upstream_main_<host>_<port>" - mismatch.
+// The fix unifies them. This test pins that contract.
+func TestRestAPITransformer_APILevelDefaultClusterMatchesRealCluster(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{Method: "GET", Path: "/users"},
+	})
+	// Add an upstreamDefinition so UseClusterHeader becomes true and
+	// DefaultCluster is actually populated.
+	spec := cfg.Configuration.(api.RestAPI)
+	spec.Spec.UpstreamDefinitions = &[]api.UpstreamDefinition{
+		{
+			Name: "stub-def",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://stub-def-svc:8080"},
+			},
+		},
+	}
+	cfg.Configuration = spec
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	mainRoute := rdc.Routes["GET|/test/users|main.local"]
+	require.NotNil(t, mainRoute)
+	require.True(t, mainRoute.Upstream.UseClusterHeader,
+		"upstreamDefinitions present, UseClusterHeader should be true so DefaultCluster is meaningful")
+	require.NotEmpty(t, mainRoute.Upstream.DefaultCluster,
+		"DefaultCluster must be populated when UseClusterHeader is true")
+
+	_, exists := rdc.UpstreamClusters[mainRoute.Upstream.DefaultCluster]
+	assert.True(t, exists,
+		"DefaultCluster %q must reference a real registered cluster in UpstreamClusters "+
+			"(prevents 503 NoRoute when policy engine writes x-target-upstream)",
+		mainRoute.Upstream.DefaultCluster)
+	assert.Equal(t, mainRoute.Upstream.ClusterKey, mainRoute.Upstream.DefaultCluster,
+		"DefaultCluster and ClusterKey must be the same string after the unification fix")
+}
+
+// TestRestAPITransformer_APILevelEDSStableAcrossURLEdit asserts that editing the
+// API-level main upstream URL does NOT change the cluster name. This is the
+// EDS-stable contract: URL edits propagate as endpoint updates, not cluster
+// recreates.
+func TestRestAPITransformer_APILevelEDSStableAcrossURLEdit(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+
+	cfgA := makeRestAPIWithOps([]api.Operation{{Method: "GET", Path: "/users"}})
+	// Mutate just the main URL on a copy of the spec.
+	rdcA, err := transformer.Transform(cfgA)
+	require.NoError(t, err)
+
+	cfgB := makeRestAPIWithOps([]api.Operation{{Method: "GET", Path: "/users"}})
+	specB := cfgB.Configuration.(api.RestAPI)
+	specB.Spec.Upstream.Main.Url = ptrStr("http://api-main-v2:9090")
+	cfgB.Configuration = specB
+	rdcB, err := transformer.Transform(cfgB)
+	require.NoError(t, err)
+
+	nameA := rdcA.Routes["GET|/test/users|main.local"].Upstream.ClusterKey
+	nameB := rdcB.Routes["GET|/test/users|main.local"].Upstream.ClusterKey
+	assert.Equal(t, nameA, nameB,
+		"API-level main cluster name must not depend on URL "+
+			"(EDS-stable contract: URL edits propagate via endpoint updates)")
 }
 

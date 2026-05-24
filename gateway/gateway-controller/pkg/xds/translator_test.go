@@ -164,10 +164,11 @@ func TestResolveUpstreamCluster_WithDirectURL(t *testing.T) {
 		Url: &url,
 	}
 
-	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("main", upstream, nil)
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, "cluster_http_backend_8080", clusterName)
+	assert.Equal(t, "main_"+apiLevelClusterKeyHash("test-api", "main"), clusterName,
+		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Equal(t, "http", parsedURL.Scheme)
 	assert.Equal(t, "backend:8080", parsedURL.Host)
@@ -199,10 +200,11 @@ func TestResolveUpstreamCluster_WithRef_WithTimeout(t *testing.T) {
 		},
 	}
 
-	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("main", upstream, definitions)
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	require.NoError(t, err)
-	assert.Equal(t, "cluster_http_backend-1_9000", clusterName)
+	assert.Equal(t, "main_"+apiLevelClusterKeyHash("test-api", "main"), clusterName,
+		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Equal(t, "http", parsedURL.Scheme)
 	assert.Equal(t, "backend-1:9000", parsedURL.Host)
@@ -232,10 +234,11 @@ func TestResolveUpstreamCluster_WithRef_NoTimeout(t *testing.T) {
 		},
 	}
 
-	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("main", upstream, definitions)
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	require.NoError(t, err)
-	assert.Equal(t, "cluster_http_backend_8080", clusterName)
+	assert.Equal(t, "main_"+apiLevelClusterKeyHash("test-api", "main"), clusterName,
+		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Nil(t, timeout, "No timeout in definition should result in nil timeout")
 }
@@ -260,7 +263,7 @@ func TestResolveUpstreamCluster_WithRef_NotFound(t *testing.T) {
 		},
 	}
 
-	_, _, _, err := translator.resolveUpstreamCluster("main", upstream, definitions)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to resolve main upstream ref")
@@ -291,7 +294,7 @@ func TestResolveUpstreamCluster_WithRef_InvalidTimeout(t *testing.T) {
 		},
 	}
 
-	_, _, _, err := translator.resolveUpstreamCluster("main", upstream, definitions)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid timeout in upstream definition")
@@ -313,7 +316,7 @@ func TestResolveUpstreamCluster_WithRef_NoURLs(t *testing.T) {
 		},
 	}
 
-	_, _, _, err := translator.resolveUpstreamCluster("main", upstream, definitions)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "has no URLs configured")
@@ -323,7 +326,7 @@ func TestResolveUpstreamCluster_NoURLOrRef(t *testing.T) {
 	translator := &Translator{}
 	upstream := &api.Upstream{}
 
-	_, _, _, err := translator.resolveUpstreamCluster("main", upstream, nil)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, nil)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no main upstream configured")
@@ -336,7 +339,7 @@ func TestResolveUpstreamCluster_InvalidURL(t *testing.T) {
 		Url: &invalidURL,
 	}
 
-	_, _, _, err := translator.resolveUpstreamCluster("main", upstream, nil)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, nil)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid main upstream URL")
@@ -627,52 +630,6 @@ func TestTranslator_WildcardRegexBoundary(t *testing.T) {
 		for _, p := range tc.shouldNotMatch {
 			assert.False(t, re.MatchString(p), "regex %q should NOT match %q", regexSpec.SafeRegex.Regex, p)
 		}
-	}
-}
-
-func TestTranslator_SanitizeClusterName(t *testing.T) {
-	logger := createTestLogger()
-	routerCfg := testRouterConfig()
-	cfg := testConfig()
-	translator := NewTranslator(logger, routerCfg, nil, cfg)
-
-	tests := []struct {
-		name     string
-		hostname string
-		scheme   string
-		expected string
-	}{
-		{
-			name:     "Simple hostname HTTP",
-			hostname: "localhost",
-			scheme:   "http",
-			expected: "cluster_http_localhost",
-		},
-		{
-			name:     "Dotted hostname HTTPS",
-			hostname: "api.example.com",
-			scheme:   "https",
-			expected: "cluster_https_api_example_com",
-		},
-		{
-			name:     "Hostname with port",
-			hostname: "localhost:8080",
-			scheme:   "http",
-			expected: "cluster_http_localhost_8080",
-		},
-		{
-			name:     "Complex hostname",
-			hostname: "api.v1.prod.example.com:443",
-			scheme:   "https",
-			expected: "cluster_https_api_v1_prod_example_com_443",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := translator.sanitizeClusterName(tt.hostname, tt.scheme)
-			assert.Equal(t, tt.expected, result)
-		})
 	}
 }
 
@@ -1391,7 +1348,7 @@ func TestTranslator_ResolveUpstreamCluster_SimpleURL(t *testing.T) {
 		Url: &urlStr,
 	}
 
-	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-upstream", upstream, nil)
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "test-upstream", upstream, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, clusterName)
 	assert.NotNil(t, parsedURL)
@@ -1410,7 +1367,7 @@ func TestTranslator_ResolveUpstreamCluster_HTTPSUrl(t *testing.T) {
 		Url: &urlStr,
 	}
 
-	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("secure-upstream", upstream, nil)
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "secure-upstream", upstream, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, clusterName)
 	assert.NotNil(t, parsedURL)
@@ -1428,7 +1385,7 @@ func TestTranslator_ResolveUpstreamCluster_MissingURL(t *testing.T) {
 		Url: nil, // No URL
 	}
 
-	_, _, _, err := translator.resolveUpstreamCluster("no-url-upstream", upstream, nil)
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "no-url-upstream", upstream, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no no-url-upstream upstream configured")
 }
@@ -2073,6 +2030,40 @@ func TestResolvePerOpUpstream_DedupSameURL(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, nameA, nameB, "cluster name must not depend on URL - same apiID|method|path|env must produce same cluster")
+}
+
+// TestResolveUpstreamCluster_DedupSameAPIDifferentURLs asserts the EDS-stable
+// contract at the API level. Two distinct URLs that share the same apiID and
+// env must resolve to the same cluster name so URL edits become EDS endpoint
+// updates instead of CDS cluster recreates.
+func TestResolveUpstreamCluster_DedupSameAPIDifferentURLs(t *testing.T) {
+	translator := &Translator{}
+	a := &api.Upstream{Url: strPtr("http://api-main:8080")}
+	b := &api.Upstream{Url: strPtr("http://api-main:9090")}
+
+	nameA, _, _, err := translator.resolveUpstreamCluster("test-api", "main", a, nil)
+	require.NoError(t, err)
+	nameB, _, _, err := translator.resolveUpstreamCluster("test-api", "main", b, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, nameA, nameB,
+		"API-level cluster name must not depend on URL - same apiID|env must produce same cluster")
+}
+
+// TestResolveUpstreamCluster_MainSandboxNeverCollide proves env separation:
+// the same apiID with env=main vs env=sandbox must produce distinct cluster
+// names so both vhosts can coexist.
+func TestResolveUpstreamCluster_MainSandboxNeverCollide(t *testing.T) {
+	translator := &Translator{}
+	up := &api.Upstream{Url: strPtr("http://api-main:8080")}
+
+	mainName, _, _, err := translator.resolveUpstreamCluster("test-api", "main", up, nil)
+	require.NoError(t, err)
+	sandboxName, _, _, err := translator.resolveUpstreamCluster("test-api", "sandbox", up, nil)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, mainName, sandboxName,
+		"main and sandbox cluster names must differ (env is part of the hash input)")
 }
 
 // TestResolvePerOpUpstream_DistinctEnvs - distinct env labels never collide on

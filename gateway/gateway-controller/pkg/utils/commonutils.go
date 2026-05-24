@@ -130,3 +130,15 @@ func PerOpClusterKey(apiID, method, path, env string) string {
 	sum := sha256.Sum256([]byte(hashInput))
 	return hex.EncodeToString(sum[:8]) // 8 bytes = 16 hex chars
 }
+
+// APILevelClusterKey returns a deterministic, hex-encoded cluster key fragment for an
+// API-level upstream cluster (main or sandbox). The key is derived from SHA-256 of
+// apiID|env (env is "main" or "sandbox"). Method and path are intentionally excluded
+// because API-level upstream applies to the whole API. The URL is also excluded so
+// that upstream URL edits update endpoints in-place rather than destroying and
+// recreating the cluster.
+func APILevelClusterKey(apiID, env string) string {
+	hashInput := apiID + "|" + env
+	sum := sha256.Sum256([]byte(hashInput))
+	return hex.EncodeToString(sum[:8]) // 8 bytes = 16 hex chars
+}
