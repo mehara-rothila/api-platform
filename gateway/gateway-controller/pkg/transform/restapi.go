@@ -31,6 +31,8 @@ import (
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/config"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/models"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils"
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils/clusterkey"
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils/upstreamref"
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/xds"
 	policyv1alpha "github.com/wso2/api-platform/sdk/core/policy/v1alpha2"
 	policyenginev1 "github.com/wso2/api-platform/sdk/core/policyengine"
@@ -140,9 +142,23 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 	// Determine vhosts to create routes for.
 	// Sandbox is active when a sandbox upstream is configured via either url or ref.
-	hasSandbox := apiData.Upstream.Sandbox != nil &&
+	apiSandboxHasContent := apiData.Upstream.Sandbox != nil &&
 		((apiData.Upstream.Sandbox.Url != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Url) != "") ||
 			(apiData.Upstream.Sandbox.Ref != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Ref) != ""))
+	hasSandbox := apiSandboxHasContent
+
+	// Also active if any operation defines a per-op sandbox upstream.
+	if !hasSandbox {
+		for _, op := range apiData.Operations {
+			if op.Upstream != nil && op.Upstream.Sandbox != nil {
+				sb := op.Upstream.Sandbox
+				if strings.TrimSpace(sb.Ref) != "" {
+					hasSandbox = true
+					break
+				}
+			}
+		}
+	}
 
 	// Guard: sandbox and main vhosts must differ, otherwise sandbox routes would
 	// overwrite main routes (same route key) and the sandbox patch would leave only
@@ -153,25 +169,92 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 	// Build routes and policy chains for each operation
 	for _, op := range apiData.Operations {
+		mainVhostClusterKey := mainUpstream.ClusterKey
+		mainVhostUseClusterHeader := useClusterHeader
+		mainVhostDefaultCluster := defaultCluster
+		mainVhostAutoHostRewrite := mainAutoHostRewrite
+
+		sandboxVhostClusterKey := mainUpstream.ClusterKey
+		sandboxVhostUseClusterHeader := useClusterHeader
+		sandboxVhostDefaultCluster := defaultCluster
+		// Sandbox routes inherit the API-level sandbox HostRewrite when an API-level
+		// sandbox is configured; otherwise they fall back to the API-level main
+		// setting. This keeps per-op sandbox override routes (which carry no
+		// HostRewrite of their own) consistent with the xDS translator path.
+		sandboxVhostAutoHostRewrite := mainAutoHostRewrite
+		if apiSandboxHasContent {
+			sandboxVhostAutoHostRewrite = true
+			if apiData.Upstream.Sandbox.HostRewrite != nil && *apiData.Upstream.Sandbox.HostRewrite == api.Manual {
+				sandboxVhostAutoHostRewrite = false
+			}
+		}
+
+		if op.Upstream != nil {
+			if op.Upstream.Main != nil {
+				defClusterKey, err := perOpDefinitionClusterKey(cfg.Kind, cfg.UUID, op.Upstream.Main, apiData.UpstreamDefinitions)
+				if err != nil {
+					return nil, fmt.Errorf("per-op main upstream for %s %s: %w", string(op.Method), op.Path, err)
+				}
+				// Reuse the referenced upstreamDefinition's cluster (registered
+				// unconditionally below) instead of minting a per-op cluster. Keep
+				// cluster_header ON with that cluster as the default so a dynamic-endpoint
+				// policy can still steer this operation. Precedence:
+				// op-policy > api-policy > per-op ref > api-level upstream.
+				mainVhostClusterKey = defClusterKey
+				mainVhostUseClusterHeader = true
+				mainVhostDefaultCluster = defClusterKey
+				// AutoHostRewrite inherits API-level setting; per-op target is ref-only with no HostRewrite field.
+			}
+			if op.Upstream.Sandbox != nil {
+				defClusterKey, err := perOpDefinitionClusterKey(cfg.Kind, cfg.UUID, op.Upstream.Sandbox, apiData.UpstreamDefinitions)
+				if err != nil {
+					return nil, fmt.Errorf("per-op sandbox upstream for %s %s: %w", string(op.Method), op.Path, err)
+				}
+				// Keep cluster_header ON for the sandbox per-op route too, so a sandbox
+				// dynamic-endpoint policy can override the per-op default — consistent with
+				// the API-level sandbox routing fixed in #2059 (no static-pin bypass).
+				sandboxVhostClusterKey = defClusterKey
+				sandboxVhostUseClusterHeader = true
+				sandboxVhostDefaultCluster = defClusterKey
+				// AutoHostRewrite inherits API-level setting; per-op target is ref-only with no HostRewrite field.
+			}
+		}
+
 		vhosts := []string{effectiveMainVHost}
 		if hasSandbox {
-			vhosts = append(vhosts, effectiveSandboxVHost)
+			// Only add sandbox vhost when this specific op has sandbox config -
+			// either via API-level sandbox fallback OR a per-op sandbox override.
+			// Without this guard, ops with no sandbox config would get a sandbox
+			// route silently pointing to the main cluster (placeholder default).
+			if apiSandboxHasContent || (op.Upstream != nil && op.Upstream.Sandbox != nil) {
+				vhosts = append(vhosts, effectiveSandboxVHost)
+			}
 		}
 
 		for _, vhost := range vhosts {
 			routeKey := xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, vhost)
 
-			// Build route
+			clusterKey := mainVhostClusterKey
+			vhostUseClusterHeader := mainVhostUseClusterHeader
+			vhostDefaultCluster := mainVhostDefaultCluster
+			autoHostRewrite := mainVhostAutoHostRewrite
+			if vhost == effectiveSandboxVHost {
+				clusterKey = sandboxVhostClusterKey
+				vhostUseClusterHeader = sandboxVhostUseClusterHeader
+				vhostDefaultCluster = sandboxVhostDefaultCluster
+				autoHostRewrite = sandboxVhostAutoHostRewrite
+			}
+
 			rdc.Routes[routeKey] = &models.Route{
 				Method:          string(op.Method),
 				Path:            xds.ConstructFullPath(apiData.Context, apiData.Version, op.Path),
 				OperationPath:   op.Path,
 				Vhost:           vhost,
-				AutoHostRewrite: mainAutoHostRewrite,
+				AutoHostRewrite: autoHostRewrite,
 				Upstream: models.RouteUpstream{
-					ClusterKey:       mainUpstream.ClusterKey,
-					UseClusterHeader: useClusterHeader,
-					DefaultCluster:   defaultCluster,
+					ClusterKey:       clusterKey,
+					UseClusterHeader: vhostUseClusterHeader,
+					DefaultCluster:   vhostDefaultCluster,
 				},
 			}
 
@@ -200,6 +283,8 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			if def.BasePath != nil && *def.BasePath != "" {
 				basePath = *def.BasePath
 			}
+			// ConnectTimeout omitted here as well; see addUpstreamCluster for why
+			// (this RDC path feeds only the policy xDS).
 			rdc.UpstreamClusters[defClusterKey] = &models.UpstreamCluster{
 				Name:     def.Name,
 				BasePath: basePath,
@@ -212,8 +297,9 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 		}
 	}
 
-	// Add sandbox upstream and update sandbox routes if present
-	if hasSandbox {
+	// Add sandbox upstream and update sandbox routes if present.
+	// API-level sandbox is optional when per-op sandbox overrides exist.
+	if hasSandbox && apiSandboxHasContent {
 		sbUpstream, err := t.addUpstreamCluster(rdc, "sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve sandbox upstream: %w", err)
@@ -224,8 +310,12 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			sbAutoHostRewrite = false
 		}
 
-		// Update sandbox vhost routes to point to sandbox cluster
+		// Update sandbox vhost routes to point to sandbox cluster, except ops with
+		// their own per-op sandbox override (already wired in the main loop).
 		for _, op := range apiData.Operations {
+			if op.Upstream != nil && op.Upstream.Sandbox != nil {
+				continue
+			}
 			routeKey := xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, effectiveSandboxVHost)
 			if r, exists := rdc.Routes[routeKey]; exists {
 				r.Upstream.ClusterKey = sbUpstream.ClusterKey
@@ -298,9 +388,11 @@ func (t *RestAPITransformer) buildPolicyChain(
 type upstreamClusterResult struct {
 	// ClusterKey is the internal key used in rdc.UpstreamClusters.
 	ClusterKey string
-	// EnvoyClusterName is the Envoy cluster name matching pkg/xds/translator.go's
-	// sanitizeClusterName format ("cluster_<scheme>_<sanitized_host>").
-	// This is the value Envoy knows the cluster by, so PE must use it for x-target-upstream.
+	// EnvoyClusterName is the Envoy cluster name. For API-level upstreams it is
+	// the EDS-stable hashed name "<env>_<16-hex>" (matching ClusterKey). For
+	// per-op upstreams it is empty because the route resolves the cluster via
+	// ClusterKey directly. This is the value Envoy knows the cluster by, so the
+	// policy engine must use it for the x-target-upstream header.
 	EnvoyClusterName string
 	// BasePath is the URL path component of the upstream (e.g. "/anything/foo").
 	BasePath string
@@ -337,8 +429,17 @@ func (t *RestAPITransformer) addUpstreamCluster(
 		basePath = "/"
 	}
 
-	clusterKey := fmt.Sprintf("upstream_%s_%s_%d", upstreamName, parsedURL.Hostname(), port)
+	// EDS-stable cluster naming: derived from sha256(apiID|env) so URL edits
+	// propagate as endpoint updates rather than cluster recreates. ClusterKey and
+	// EnvoyClusterName are intentionally the same string so the policy engine's
+	// `default_upstream_cluster` metadata points at the actual Envoy cluster.
+	clusterKey := upstreamName + "_" + clusterkey.APILevel(rdc.Metadata.UUID, upstreamName)
 
+	// ConnectTimeout is intentionally not set on this RDC cluster: the data plane
+	// resolves API-level timeouts via the legacy xDS translator, and this RDC path
+	// feeds only the policy xDS, which does not read UpstreamCluster.ConnectTimeout.
+	// If a transformer is ever wired onto the data-plane xDS, resolve it here via
+	// upstreamref.ResolveConnectTimeout to keep parity with the legacy path.
 	rdc.UpstreamClusters[clusterKey] = &models.UpstreamCluster{
 		BasePath: basePath,
 		Endpoints: []models.Endpoint{{
@@ -348,19 +449,33 @@ func (t *RestAPITransformer) addUpstreamCluster(
 		TLS: &models.UpstreamTLS{Enabled: parsedURL.Scheme == "https"},
 	}
 
+	// ClusterKey and EnvoyClusterName must be the same string. If they differ,
+	// the default_upstream_cluster metadata written by the policy engine will
+	// not match the Envoy cluster name, producing 503 NoRoute when the default
+	// upstream path is taken.
 	return &upstreamClusterResult{
 		ClusterKey:       clusterKey,
-		EnvoyClusterName: sanitizeEnvoyClusterName(parsedURL.Host, parsedURL.Scheme),
+		EnvoyClusterName: clusterKey,
 		BasePath:         basePath,
 	}, nil
 }
 
-// sanitizeEnvoyClusterName computes the Envoy cluster name from a URL host and scheme,
-// matching the sanitizeClusterName logic in pkg/xds/translator.go.
-func sanitizeEnvoyClusterName(host, scheme string) string {
-	name := strings.ReplaceAll(host, ".", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	return "cluster_" + scheme + "_" + name
+// perOpDefinitionClusterKey resolves a ref-only per-op upstream target to the cluster
+// key of the referenced upstreamDefinition. That definition's cluster is registered
+// unconditionally (see the upstreamDefinition cluster loop in Transform), so a per-op
+// route reuses it rather than minting its own cluster. One cluster per definition
+// serves both the main and sandbox vhosts — the key carries no env component. Reuse
+// also means the route inherits the definition's authoritative basePath (#2065),
+// avoiding the URL-derived-basePath divergence a separate per-op cluster would have.
+func perOpDefinitionClusterKey(kind, uuid string, target *api.RestAPIOperationUpstreamTarget, upstreamDefinitions *[]api.UpstreamDefinition) (string, error) {
+	def, err := upstreamref.FindByName(target.Ref, upstreamDefinitions)
+	if err != nil {
+		return "", err
+	}
+	if len(def.Upstreams) == 0 || def.Upstreams[0].Url == "" {
+		return "", fmt.Errorf("upstream definition '%s' has no URLs", strings.TrimSpace(target.Ref))
+	}
+	return "upstream_" + kind + "_" + uuid + "_" + SanitizeUpstreamDefinitionName(def.Name), nil
 }
 
 // resolveUpstreamURL resolves the URL from an upstream (direct URL or ref). For a ref it
@@ -372,22 +487,23 @@ func resolveUpstreamURL(name string, up *api.Upstream, defs *[]api.UpstreamDefin
 	}
 	if up.Ref != nil && strings.TrimSpace(*up.Ref) != "" {
 		refName := strings.TrimSpace(*up.Ref)
-		if defs == nil {
-			return "", nil, fmt.Errorf("upstream definition '%s' referenced but no definitions provided", refName)
+		// Resolve through the shared upstreamref helper (one source of truth for ref
+		// lookup, shared with the per-op transformer and the xDS translator), and return
+		// the definition's base path (from basePath, #2065) so the caller rewrites the
+		// upstream path correctly. The "no URLs" check stays here since FindByName
+		// resolves the definition, not its endpoints.
+		def, err := upstreamref.FindByName(refName, defs)
+		if err != nil {
+			return "", nil, err
 		}
-		for _, def := range *defs {
-			if def.Name == refName {
-				if len(def.Upstreams) == 0 || def.Upstreams[0].Url == "" {
-					return "", nil, fmt.Errorf("upstream definition '%s' has no URLs", refName)
-				}
-				basePath := ""
-				if def.BasePath != nil {
-					basePath = *def.BasePath
-				}
-				return def.Upstreams[0].Url, &basePath, nil
-			}
+		if len(def.Upstreams) == 0 || def.Upstreams[0].Url == "" {
+			return "", nil, fmt.Errorf("upstream definition '%s' has no URLs", refName)
 		}
-		return "", nil, fmt.Errorf("upstream definition '%s' not found", refName)
+		basePath := ""
+		if def.BasePath != nil {
+			basePath = *def.BasePath
+		}
+		return def.Upstreams[0].Url, &basePath, nil
 	}
 	return "", nil, fmt.Errorf("%s upstream has no URL or ref", name)
 }

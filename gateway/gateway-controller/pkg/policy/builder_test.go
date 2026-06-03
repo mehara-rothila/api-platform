@@ -113,7 +113,7 @@ func TestDerivePolicyFromAPIConfig_SandboxVhosts(t *testing.T) {
 		{
 			name:           "sandbox present but url and ref both nil",
 			sandbox:        &api.Upstream{},
-			wantRouteCount: 2,
+			wantRouteCount: 1,
 		},
 	}
 
@@ -127,16 +127,18 @@ func TestDerivePolicyFromAPIConfig_SandboxVhosts(t *testing.T) {
 			assert.Len(t, result.Configuration.Routes, tc.wantRouteCount,
 				"expected %d route key(s) for case %q", tc.wantRouteCount, tc.name)
 
-			if tc.sandbox != nil {
-				// Verify that the sandbox vhost ("sandbox.local") appears in at least one route key.
-				hasSandboxRoute := false
+			if tc.sandbox != nil && (tc.sandbox.Url != nil || tc.sandbox.Ref != nil) {
+				var mainRoutes, sandboxRoutes int
 				for _, r := range result.Configuration.Routes {
+					if strings.Contains(r.RouteKey, "main.local") {
+						mainRoutes++
+					}
 					if strings.Contains(r.RouteKey, "sandbox.local") {
-						hasSandboxRoute = true
-						break
+						sandboxRoutes++
 					}
 				}
-				assert.True(t, hasSandboxRoute, "expected a route key containing 'sandbox.local'")
+				assert.Equal(t, 1, mainRoutes, "expected exactly one route key containing 'main.local'")
+				assert.Equal(t, 1, sandboxRoutes, "expected exactly one route key containing 'sandbox.local'")
 			}
 		})
 	}
@@ -228,7 +230,7 @@ func TestDerivePolicyFromAPIConfig_OperationLevelEmptyVersionResolvesToLatest(t 
 // TestDerivePolicyFromAPIConfig_UnknownPolicySkipped verifies that a policy not present
 // in the definitions is silently skipped and does not cause a panic or error.
 func TestDerivePolicyFromAPIConfig_UnknownPolicySkipped(t *testing.T) {
-	defs := map[string]models.PolicyDefinition{} // empty — policy won't be found
+	defs := map[string]models.PolicyDefinition{} // empty - policy won't be found
 
 	apiConfig := api.RestAPI{
 		Kind:     api.RestAPIKindRestApi,
@@ -255,4 +257,67 @@ func TestDerivePolicyFromAPIConfig_UnknownPolicySkipped(t *testing.T) {
 	// Unknown policy should be skipped; with no resolved policies the result is nil.
 	result := DerivePolicyFromAPIConfig(cfg, testRouterConfig(), &config.Config{}, defs)
 	assert.Nil(t, result, "expected nil result when all policies are unresolvable")
+}
+
+// TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox - when an API has NO
+// API-level sandbox but an operation declares a per-op sandbox upstream, the policy
+// builder must still emit a sandbox policy chain for that operation so the sandbox
+// route created by the transformer gets policies attached. Without this, sandbox
+// traffic on per-op sandbox routes would run with no policies (no auth, no rate
+// limiting, no analytics).
+func TestDerivePolicyFromAPIConfig_PerOpSandboxWithoutAPISandbox(t *testing.T) {
+	apiConfig := api.RestAPI{
+		Kind:     api.RestAPIKindRestApi,
+		Metadata: api.Metadata{Name: "test-api"},
+		Spec: api.APIConfigData{
+			DisplayName: "Test API",
+			Context:     "/test",
+			Version:     "1.0.0",
+			UpstreamDefinitions: &[]api.UpstreamDefinition{
+				{Name: "op-sb-cluster", Upstreams: []struct {
+					Url    string `json:"url" yaml:"url"`
+					Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+				}{{Url: "http://op-sb:9000"}}},
+			},
+			Operations: []api.Operation{
+				{
+					Method: "GET", Path: "/hello",
+					Upstream: &api.RestAPIOperationUpstream{
+						Sandbox: &api.RestAPIOperationUpstreamTarget{Ref: "op-sb-cluster"},
+					},
+				},
+			},
+			Policies: &[]api.Policy{{Name: "header-mutate", Version: "v1"}},
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{
+				Main:    api.Upstream{Url: ptr("http://backend:8080")},
+				Sandbox: nil, // intentionally no API-level sandbox
+			},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID:                "test-api",
+		Kind:                string(api.RestAPIKindRestApi),
+		Configuration:       apiConfig,
+		SourceConfiguration: apiConfig,
+	}
+
+	result := DerivePolicyFromAPIConfig(cfg, testRouterConfig(), &config.Config{}, policyDefs)
+	require.NotNil(t, result, "expected non-nil policy config (API has policies)")
+	require.Len(t, result.Configuration.Routes, 2,
+		"expected both main and sandbox policy chains for an operation with per-op sandbox")
+
+	var mainRoutes, sandboxRoutes int
+	for _, r := range result.Configuration.Routes {
+		if strings.Contains(r.RouteKey, "main.local") {
+			mainRoutes++
+		}
+		if strings.Contains(r.RouteKey, "sandbox.local") {
+			sandboxRoutes++
+		}
+	}
+	assert.Equal(t, 1, mainRoutes, "main vhost route must be emitted exactly once for per-op sandbox operation")
+	assert.Equal(t, 1, sandboxRoutes, "sandbox vhost route must be emitted exactly once for per-op sandbox operation")
 }

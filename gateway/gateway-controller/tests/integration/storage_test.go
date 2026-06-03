@@ -798,3 +798,88 @@ func TestSQLiteStorage_LabelsPersistence(t *testing.T) {
 		assert.Equal(t, labels, retrieved, "Loaded labels should match persisted labels")
 	})
 }
+
+func TestSQLiteStorage_PerOpUpstreamRefRoundtrip(t *testing.T) {
+	db, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	apiURL := "http://api-main:9080"
+	apiConfig := api.RestAPI{
+		ApiVersion: api.RestAPIApiVersionGatewayApiPlatformWso2Comv1alpha1,
+		Kind:       api.RestAPIKindRestApi,
+		Metadata:   api.Metadata{Name: "PerOpRefAPI-v1.0"},
+		Spec: api.APIConfigData{
+			DisplayName: "PerOpRefAPI",
+			Version:     "v1.0",
+			Context:     "/per-op-ref",
+			UpstreamDefinitions: &[]api.UpstreamDefinition{
+				{
+					Name: "users-svc",
+					Upstreams: []struct {
+						Url    string `json:"url" yaml:"url"`
+						Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+					}{{Url: "http://users-backend:9080"}},
+				},
+				{
+					Name: "users-sandbox-svc",
+					Upstreams: []struct {
+						Url    string `json:"url" yaml:"url"`
+						Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+					}{{Url: "http://users-sandbox:9080"}},
+				},
+			},
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{
+				Main: api.Upstream{Url: &apiURL},
+			},
+			Operations: []api.Operation{
+				{
+					Method: api.OperationMethodGET,
+					Path:   "/users",
+					Upstream: &api.RestAPIOperationUpstream{
+						Main:    &api.RestAPIOperationUpstreamTarget{Ref: "users-svc"},
+						Sandbox: &api.RestAPIOperationUpstreamTarget{Ref: "users-sandbox-svc"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := &models.StoredConfig{
+		UUID:                uuid.New().String(),
+		Kind:                string(api.RestAPIKindRestApi),
+		Handle:              "PerOpRefAPI-v1.0",
+		DisplayName:         "PerOpRefAPI",
+		Version:             "v1.0",
+		Configuration:       apiConfig,
+		SourceConfiguration: apiConfig,
+		DesiredState:        models.StateDeployed,
+		Origin:              models.OriginGatewayAPI,
+	}
+
+	require.NoError(t, db.SaveConfig(cfg))
+
+	retrieved, err := db.GetConfig(cfg.UUID)
+	require.NoError(t, err)
+
+	spec := retrieved.Configuration.(api.RestAPI).Spec
+	require.NotNil(t, spec.UpstreamDefinitions, "upstreamDefinitions must survive roundtrip")
+	require.Len(t, *spec.UpstreamDefinitions, 2)
+	defs := *spec.UpstreamDefinitions
+	assert.Equal(t, "users-svc", defs[0].Name)
+	require.Len(t, defs[0].Upstreams, 1)
+	assert.Equal(t, "http://users-backend:9080", defs[0].Upstreams[0].Url)
+	assert.Equal(t, "users-sandbox-svc", defs[1].Name)
+	require.Len(t, defs[1].Upstreams, 1)
+	assert.Equal(t, "http://users-sandbox:9080", defs[1].Upstreams[0].Url)
+	require.Len(t, spec.Operations, 1)
+
+	op := spec.Operations[0]
+	require.NotNil(t, op.Upstream, "per-op upstream must survive roundtrip")
+	require.NotNil(t, op.Upstream.Main)
+	assert.Equal(t, "users-svc", op.Upstream.Main.Ref)
+	require.NotNil(t, op.Upstream.Sandbox)
+	assert.Equal(t, "users-sandbox-svc", op.Upstream.Sandbox.Ref)
+}

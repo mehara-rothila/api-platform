@@ -811,6 +811,62 @@ func TestValidateUpstreamDefinitions_NoTimeout(t *testing.T) {
 	assert.Empty(t, errors, "No timeout should be valid")
 }
 
+func TestValidateUpstreamDefinitions_NonPositiveTimeout(t *testing.T) {
+	validator := NewAPIValidator()
+
+	for _, badTimeout := range []string{"0s", "-5s"} {
+		connect := badTimeout
+		definitions := &[]api.UpstreamDefinition{
+			{
+				Name: "my-upstream",
+				Timeout: &api.UpstreamTimeout{
+					Connect: &connect,
+				},
+				Upstreams: []struct {
+					Url    string `json:"url" yaml:"url"`
+					Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+				}{
+					{
+						Url: "http://backend:8080",
+					},
+				},
+			},
+		}
+
+		errors := validator.validateUpstreamDefinitions(definitions)
+		require.Len(t, errors, 1, "timeout %q must be rejected", badTimeout)
+		assert.Equal(t, "spec.upstreamDefinitions[0].timeout.connect", errors[0].Field)
+		assert.Contains(t, errors[0].Message, "must be a positive duration")
+	}
+}
+
+func TestValidateUpstreamDefinitions_MalformedTimeout(t *testing.T) {
+	validator := NewAPIValidator()
+
+	connect := "abc"
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "my-upstream",
+			Timeout: &api.UpstreamTimeout{
+				Connect: &connect,
+			},
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{
+					Url: "http://backend:8080",
+				},
+			},
+		},
+	}
+
+	errors := validator.validateUpstreamDefinitions(definitions)
+	require.Len(t, errors, 1)
+	assert.Equal(t, "spec.upstreamDefinitions[0].timeout.connect", errors[0].Field)
+	assert.Contains(t, errors[0].Message, "Invalid timeout format")
+}
+
 func TestValidateUpstreamRef_ValidRef(t *testing.T) {
 	validator := NewAPIValidator()
 
@@ -891,4 +947,183 @@ func TestValidateUpstream_WithRefAndDefinitions(t *testing.T) {
 
 	errors := validator.validateUpstream("main", upstream, definitions)
 	assert.Empty(t, errors)
+}
+
+// TestValidateOperationUpstream_ValidRef asserts that a well-formed ref passes validation
+// when it resolves to a known upstreamDefinition.
+func TestValidateOperationUpstream_ValidRef(t *testing.T) {
+	validator := NewAPIValidator()
+	definitions := &[]api.UpstreamDefinition{
+		{Name: "user-svc-cluster", Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://user-svc:8080"}}},
+	}
+	up := &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: "user-svc-cluster"},
+	}
+
+	errors := validator.validateOperationUpstream(0, up, definitions)
+	assert.Empty(t, errors)
+}
+
+// TestValidateOperationUpstream_EmptyRef asserts that an empty ref is rejected
+// with a per-op-scoped error field path.
+func TestValidateOperationUpstream_EmptyRef(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: ""},
+	}
+
+	errors := validator.validateOperationUpstream(2, up, nil)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[2].upstream.main") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "validation error should be scoped to spec.operations[2].upstream.main, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_UnknownRef asserts that a ref not matching any
+// upstreamDefinition is rejected.
+func TestValidateOperationUpstream_UnknownRef(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: "missing-cluster"},
+	}
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "user-svc-cluster",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://user-svc:8080"},
+			},
+		},
+	}
+
+	errors := validator.validateOperationUpstream(0, up, definitions)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected unknown-ref error scoped to main.ref, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_EmptyWrapper asserts that a wrapper with neither
+// main nor sandbox set is rejected.
+func TestValidateOperationUpstream_EmptyWrapper(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.RestAPIOperationUpstream{}
+
+	errors := validator.validateOperationUpstream(3, up, nil)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if e.Field == "spec.operations[3].upstream" &&
+			strings.Contains(strings.ToLower(e.Message), "at least one") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected anyOf error at wrapper level, got %+v", errors)
+}
+
+func TestValidateOperationUpstream_EmptyLeaf(t *testing.T) {
+	validator := NewAPIValidator()
+	up := &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: ""}, // empty ref
+	}
+
+	errors := validator.validateOperationUpstream(0, up, nil)
+	require.NotEmpty(t, errors, "empty ref must be rejected")
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected rejection scoped to main.ref, got %+v", errors)
+}
+
+// TestValidateOperationUpstream_RefPatternRejected asserts that a ref containing
+// characters outside ^[a-zA-Z0-9\-_]+$ is rejected before the existence check.
+func TestValidateOperationUpstream_RefPatternRejected(t *testing.T) {
+	validator := NewAPIValidator()
+	definitions := &[]api.UpstreamDefinition{
+		{Name: "user-svc-cluster", Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://user-svc:8080"}}},
+	}
+
+	for _, badRef := range []string{"bad/ref", "bad ref", "bad.ref!", "../etc"} {
+		up := &api.RestAPIOperationUpstream{
+			Main: &api.RestAPIOperationUpstreamTarget{Ref: badRef},
+		}
+		errors := validator.validateOperationUpstream(0, up, definitions)
+		require.NotEmpty(t, errors, "ref %q must be rejected", badRef)
+		found := false
+		for _, e := range errors {
+			if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") &&
+				strings.Contains(e.Message, "must match pattern") {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected pattern-rejection error for ref %q, got %+v", badRef, errors)
+	}
+}
+
+// TestValidateOperationUpstream_RefMaxLength asserts that a ref longer than 100
+// characters is rejected, matching the OpenAPI schema maxLength constraint.
+func TestValidateOperationUpstream_RefMaxLength(t *testing.T) {
+	validator := NewAPIValidator()
+	longRef := strings.Repeat("a", 101)
+	exactRef := strings.Repeat("b", 100)
+	definitions := &[]api.UpstreamDefinition{
+		{Name: "user-svc-cluster", Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://user-svc:8080"}}},
+		{Name: longRef, Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://long-svc:8080"}}},
+		{Name: exactRef, Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://exact-svc:8080"}}},
+	}
+
+	up := &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: longRef},
+	}
+	errors := validator.validateOperationUpstream(0, up, definitions)
+	require.NotEmpty(t, errors, "ref longer than 100 chars must be rejected")
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") &&
+			strings.Contains(e.Message, "must not exceed 100 characters") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected maxLength-rejection error for ref of len %d, got %+v", len(longRef), errors)
+
+	// Boundary: exactly 100 characters should pass
+	up = &api.RestAPIOperationUpstream{
+		Main: &api.RestAPIOperationUpstreamTarget{Ref: exactRef},
+	}
+	errors = validator.validateOperationUpstream(0, up, definitions)
+	assert.Empty(t, errors, "ref of exactly 100 chars must pass")
 }

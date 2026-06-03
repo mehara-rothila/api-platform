@@ -4132,6 +4132,41 @@ components:
           description: List of policies applied only to this operation (overrides or adds to API-level policies)
           items:
             $ref: "#/components/schemas/Policy"
+        upstream:
+          $ref: "#/components/schemas/RestAPIOperationUpstream"
+          description: Per-operation upstream override with main and sandbox sub-fields.
+
+    RestAPIOperationUpstream:
+      type: object
+      additionalProperties: false
+      description: Per-operation upstream override. Each sub-field must reference a named entry in spec.upstreamDefinitions. Missing sub-fields fall back to API-level upstream. At least one of main or sandbox must be set.
+      anyOf:
+        - required: [main]
+        - required: [sandbox]
+      properties:
+        main:
+          description: Production vhost override. Must reference a named upstreamDefinition.
+          allOf:
+            - $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
+        sandbox:
+          description: Sandbox vhost override. Must reference a named upstreamDefinition.
+          allOf:
+            - $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
+
+    RestAPIOperationUpstreamTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - ref
+      description: A ref-only upstream pointer for operation-level overrides. URLs are not permitted at the operation level; all backend URLs must be declared in spec.upstreamDefinitions and referenced by name.
+      properties:
+        ref:
+          type: string
+          description: Name of a predefined upstream declared in spec.upstreamDefinitions.
+          minLength: 1
+          maxLength: 100
+          pattern: '^[a-zA-Z0-9\-_]+$'
+          example: my-upstream-1
 
     Policy:
       type: object

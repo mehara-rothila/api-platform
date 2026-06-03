@@ -373,6 +373,62 @@ func TestBuildDynamicMetadata_WithPath(t *testing.T) {
 }
 
 // =============================================================================
+// Per-op upstream + dynamic-endpoint precedence (regression: no double base prefix)
+// =============================================================================
+
+// TestTranslateRequestHeaderActions_DynamicEndpointDoesNotBakeBasePath guards the
+// per-op-upstream-ref behavior. When a dynamic-endpoint policy redirects a request to an
+// upstreamDefinition that has a base path, the kernel must NOT bake that base into a path
+// mutation: a baked path surfaces as metadata["path"], which the Lua filter reads before
+// request_transformation.target_path and would prepend the base twice
+// (e.g. /op-policy-svc/op-policy-svc/override). Instead the kernel passes the original
+// request path plus target_upstream_base_path, so the Lua prepends the base exactly once.
+func TestTranslateRequestHeaderActions_DynamicEndpointDoesNotBakeBasePath(t *testing.T) {
+	kernel := NewKernel()
+	chainExecutor := executor.NewChainExecutor(nil, nil, nil)
+	server := NewExternalProcessorServer(kernel, chainExecutor, config.TracingConfig{}, "")
+
+	chain := &registry.PolicyChain{}
+	execCtx := newPolicyExecutionContext(server, "test-route", chain)
+	execCtx.sharedCtx = &policy.SharedContext{}
+	execCtx.requestBodyCtx = &policy.RequestContext{
+		Path:          "/per-op/v1.0/override",
+		SharedContext: execCtx.sharedCtx,
+	}
+	execCtx.apiContext = "/per-op/v1.0"
+	execCtx.upstreamBasePath = "/ref-svc" // the per-op route's default base path
+	execCtx.upstreamDefinitionPaths = map[string]string{
+		"op-policy-svc": "/op-policy-svc",
+	}
+
+	targetUpstream := "op-policy-svc"
+	result := &executor.RequestHeaderExecutionResult{
+		Results: []executor.RequestHeaderPolicyResult{
+			{
+				Action: policy.UpstreamRequestHeaderModifications{
+					UpstreamName: &targetUpstream,
+				},
+			},
+		},
+	}
+
+	resp, err := TranslateRequestHeaderActions(result, chain, execCtx)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.DynamicMetadata)
+
+	extProc := resp.DynamicMetadata.Fields[constants.ExtProcFilterName].GetStructValue()
+	require.NotNil(t, extProc)
+
+	// The target upstream's base path is advertised so the Lua prepends it exactly once.
+	assert.Equal(t, "/op-policy-svc", extProc.Fields["target_upstream_base_path"].GetStringValue())
+	// The ORIGINAL request path is handed to the Lua, not a pre-computed base-prefixed path.
+	assert.Equal(t, "/per-op/v1.0/override", extProc.Fields["request_transformation.target_path"].GetStringValue())
+	// Critically: no baked "path" mutation. If present, the Lua reads it first and double-prepends the base.
+	assert.NotContains(t, extProc.Fields, "path")
+}
+
+// =============================================================================
 // translateRequestActionsCore Tests
 // =============================================================================
 

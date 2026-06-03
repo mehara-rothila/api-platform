@@ -26,6 +26,7 @@ import (
 	"time"
 
 	api "github.com/wso2/api-platform/gateway/gateway-controller/pkg/api/management"
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils/upstreamref"
 )
 
 // APIValidator validates API configurations using rule-based validation
@@ -36,6 +37,8 @@ type APIValidator struct {
 	versionRegex *regexp.Regexp
 	// urlFriendlyNameRegex matches URL-safe characters for API names
 	urlFriendlyNameRegex *regexp.Regexp
+	// upstreamRefRegex enforces the schema pattern for per-op upstream refs
+	upstreamRefRegex *regexp.Regexp
 	// policyValidator validates policy references and parameters
 	policyValidator *PolicyValidator
 }
@@ -46,6 +49,7 @@ func NewAPIValidator() *APIValidator {
 		pathParamRegex:       regexp.MustCompile(`\{[a-zA-Z0-9_]+\}`),
 		versionRegex:         regexp.MustCompile(`^v?\d+(\.\d+)?(\.\d+)?$`),
 		urlFriendlyNameRegex: regexp.MustCompile(`^[a-zA-Z0-9\-_\. ]+$`),
+		upstreamRefRegex:     regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`),
 	}
 }
 
@@ -244,16 +248,10 @@ func (v *APIValidator) validateUpstreamRef(label string, ref *string, upstreamDe
 		return errors
 	}
 
-	// Check if the referenced definition exists
-	found := false
-	for _, def := range *upstreamDefinitions {
-		if def.Name == refName {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	// Check if the referenced definition exists. Use the shared upstreamref helper
+	// for the membership lookup so API-level ref validation stays aligned with the
+	// per-op validator and the translators (one source of truth for ref lookup).
+	if _, err := upstreamref.FindByName(refName, upstreamDefinitions); err != nil {
 		errors = append(errors, ValidationError{
 			Field:   "spec.upstream." + label + ".ref",
 			Message: fmt.Sprintf("Referenced upstream definition '%s' not found in upstreamDefinitions", refName),
@@ -293,6 +291,23 @@ func (v *APIValidator) validateUpstreamDefinitions(definitions *[]api.UpstreamDe
 			continue
 		}
 		namesSeen[def.Name] = true
+
+		// Enforce the same name contract the schema declares and that operation-level
+		// refs are validated against (^[a-zA-Z0-9\-_]+$, max 100 chars), so any valid
+		// definition name stays referenceable from a per-op upstream override.
+		if len(def.Name) > 100 {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].name", i),
+				Message: "Upstream definition name must not exceed 100 characters",
+			})
+			continue
+		} else if !v.upstreamRefRegex.MatchString(def.Name) {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].name", i),
+				Message: "Upstream definition name must match pattern ^[a-zA-Z0-9\\-_]+$",
+			})
+			continue
+		}
 
 		// Validate upstreams array
 		if len(def.Upstreams) == 0 {
@@ -356,14 +371,22 @@ func (v *APIValidator) validateUpstreamDefinitions(definitions *[]api.UpstreamDe
 
 		// Timeout validation is limited to connect timeout; request and idle
 		// timeouts are no longer supported at the upstream definition level.
+		// Parsed inline rather than via upstreamref.ParseConnectTimeout so the two
+		// distinct, tested messages below (invalid-format vs non-positive) are kept;
+		// the shared helper collapses both into a single message.
 		if def.Timeout != nil && def.Timeout.Connect != nil {
 			timeoutStr := strings.TrimSpace(*def.Timeout.Connect)
 			if timeoutStr != "" {
-				_, err := time.ParseDuration(timeoutStr)
+				d, err := time.ParseDuration(timeoutStr)
 				if err != nil {
 					errors = append(errors, ValidationError{
 						Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].timeout.connect", i),
 						Message: fmt.Sprintf("Invalid timeout format: %v (expected format: '30s', '1m', '500ms')", err),
+					})
+				} else if d <= 0 {
+					errors = append(errors, ValidationError{
+						Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].timeout.connect", i),
+						Message: "Connect timeout must be a positive duration",
 					})
 				}
 			}
@@ -421,7 +444,7 @@ func (v *APIValidator) validateRestData(spec *api.APIConfigData) []ValidationErr
 	}
 
 	// Validate operations
-	errors = append(errors, v.validateOperations(spec.Operations)...)
+	errors = append(errors, v.validateOperations(spec.Operations, spec.UpstreamDefinitions)...)
 
 	return errors
 }
@@ -552,7 +575,7 @@ func (v *APIValidator) validatePathParametersForAsyncAPIs(path string) bool {
 }
 
 // validateOperations validates the operations configuration
-func (v *APIValidator) validateOperations(operations []api.Operation) []ValidationError {
+func (v *APIValidator) validateOperations(operations []api.Operation, upstreamDefinitions *[]api.UpstreamDefinition) []ValidationError {
 	var errors []ValidationError
 
 	if len(operations) == 0 {
@@ -605,9 +628,81 @@ func (v *APIValidator) validateOperations(operations []api.Operation) []Validati
 				Message: "Operation path has unbalanced braces in parameters",
 			})
 		}
+
+		// Validate per-operation upstream override (main / sandbox)
+		if op.Upstream != nil {
+			errors = append(errors, v.validateOperationUpstream(i, op.Upstream, upstreamDefinitions)...)
+		}
 	}
 
 	return errors
+}
+
+// validateOperationUpstream validates per-operation upstream main and sandbox
+// sub-fields. Operation-level upstreams are ref-only — direct URLs are not
+// permitted. Each present sub-field must reference a named entry in
+// spec.upstreamDefinitions. Error field paths are built as
+// spec.operations[N].upstream.<subfield>.ref.
+func (v *APIValidator) validateOperationUpstream(opIdx int, up *api.RestAPIOperationUpstream, upstreamDefinitions *[]api.UpstreamDefinition) []ValidationError {
+	var errors []ValidationError
+	if up == nil {
+		return errors
+	}
+	if up.Main == nil && up.Sandbox == nil {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("spec.operations[%d].upstream", opIdx),
+			Message: "At least one of 'main' or 'sandbox' must be set",
+		})
+		return errors
+	}
+	if up.Main != nil {
+		errs := v.validateOperationUpstreamTarget(opIdx, "main", up.Main, upstreamDefinitions)
+		errors = append(errors, errs...)
+	}
+	if up.Sandbox != nil {
+		errs := v.validateOperationUpstreamTarget(opIdx, "sandbox", up.Sandbox, upstreamDefinitions)
+		errors = append(errors, errs...)
+	}
+	return errors
+}
+
+// validateOperationUpstreamTarget validates a single ref-only operation-level
+// upstream target. The ref must resolve to a named entry in upstreamDefinitions.
+func (v *APIValidator) validateOperationUpstreamTarget(opIdx int, sub string, target *api.RestAPIOperationUpstreamTarget, upstreamDefinitions *[]api.UpstreamDefinition) []ValidationError {
+	field := fmt.Sprintf("spec.operations[%d].upstream.%s.ref", opIdx, sub)
+
+	refName := strings.TrimSpace(target.Ref)
+	if refName == "" {
+		return []ValidationError{{
+			Field:   field,
+			Message: "Upstream ref is required",
+		}}
+	}
+
+	if len(refName) > 100 {
+		return []ValidationError{{
+			Field:   field,
+			Message: "Upstream ref must not exceed 100 characters",
+		}}
+	}
+
+	if !v.upstreamRefRegex.MatchString(refName) {
+		return []ValidationError{{
+			Field:   field,
+			Message: "Upstream ref must match pattern ^[a-zA-Z0-9\\-_]+$",
+		}}
+	}
+
+	// Resolve through the shared upstreamref helper so the validator stays aligned
+	// with the xDS translator and RDC transformer (one source of truth for ref lookup).
+	if _, err := upstreamref.FindByName(refName, upstreamDefinitions); err != nil {
+		return []ValidationError{{
+			Field:   field,
+			Message: fmt.Sprintf("Referenced upstream definition '%s' not found in upstreamDefinitions", refName),
+		}}
+	}
+
+	return nil
 }
 
 // validatePathParameters checks if path parameters have balanced braces
