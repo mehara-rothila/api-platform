@@ -178,8 +178,9 @@ Feature: API-Level Upstream EDS-Stable Cluster Naming
           main: api-level-eds-default.local
         upstreamDefinitions:
           - name: backend-default
+            basePath: /api-main
             upstreams:
-              - url: http://sample-backend:9080/api-main
+              - url: http://sample-backend:9080
         upstream:
           main:
             ref: backend-default

@@ -246,6 +246,42 @@ func TestResolveUpstreamCluster_WithRef_NoTimeout(t *testing.T) {
 	assert.Nil(t, timeout, "No timeout in definition should result in nil timeout")
 }
 
+// A per-operation ref reuses the referenced upstreamDefinition's cluster and
+// inherits that definition's connect timeout. This asserts the timeout flows
+// through the per-op resolution path specifically (not just the API-level path).
+func TestResolvePerOpDefinitionCluster_InheritsDefinitionTimeout(t *testing.T) {
+	translator := &Translator{}
+	timeoutStr := "45s"
+	basePath := "/v2"
+	target := &api.RestAPIOperationUpstreamTarget{Ref: "my-svc"}
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name:     "my-svc",
+			BasePath: &basePath,
+			Timeout: &api.UpstreamTimeout{
+				Connect: &timeoutStr,
+			},
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{Url: "http://backend-1:9000"},
+			},
+		},
+	}
+
+	clusterName, defBasePath, timeout, err := translator.resolvePerOpDefinitionCluster("RestApi", "test-api", target, definitions)
+
+	require.NoError(t, err)
+	assert.Equal(t, constants.UpstreamDefinitionClusterPrefix+"RestApi_test-api_my-svc", clusterName,
+		"per-op route should reuse the upstream-definition cluster")
+	assert.Equal(t, "/v2", defBasePath, "per-op route inherits the definition basePath")
+	require.NotNil(t, timeout)
+	require.NotNil(t, timeout.Connect)
+	assert.Equal(t, 45*time.Second, *timeout.Connect,
+		"per-op ref must inherit the referenced definition's connect timeout")
+}
+
 func TestResolveUpstreamCluster_WithRef_NotFound(t *testing.T) {
 	translator := &Translator{}
 	ref := "0000-non-existent-0000-000000000000"
