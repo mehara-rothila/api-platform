@@ -378,11 +378,8 @@ func TestBuildDynamicMetadata_WithPath(t *testing.T) {
 
 // TestTranslateRequestHeaderActions_DynamicEndpointDoesNotBakeBasePath guards the
 // per-op-upstream-ref behavior. When a dynamic-endpoint policy redirects a request to an
-// upstreamDefinition that has a base path, the kernel must NOT bake that base into a path
-// mutation: a baked path surfaces as metadata["path"], which the Lua filter reads before
-// request_transformation.target_path and would prepend the base twice
-// (e.g. /op-policy-svc/op-policy-svc/override). Instead the kernel passes the original
-// request path plus target_upstream_base_path, so the Lua prepends the base exactly once.
+// upstreamDefinition that has a base path, the kernel must pass the original request path
+// plus target_upstream_base_path so Lua prepends the base exactly once.
 func TestTranslateRequestHeaderActions_DynamicEndpointDoesNotBakeBasePath(t *testing.T) {
 	kernel := NewKernel()
 	chainExecutor := executor.NewChainExecutor(nil, nil, nil)
@@ -422,10 +419,10 @@ func TestTranslateRequestHeaderActions_DynamicEndpointDoesNotBakeBasePath(t *tes
 
 	// The target upstream's base path is advertised so the Lua prepends it exactly once.
 	assert.Equal(t, "/op-policy-svc", extProc.Fields["target_upstream_base_path"].GetStringValue())
-	// The ORIGINAL request path is handed to the Lua, not a pre-computed base-prefixed path.
-	assert.Equal(t, "/per-op/v1.0/override", extProc.Fields["request_transformation.target_path"].GetStringValue())
-	// Critically: no baked "path" mutation. If present, the Lua reads it first and double-prepends the base.
-	assert.NotContains(t, extProc.Fields, "path")
+	// The ORIGINAL request path is handed to Lua via the single path metadata channel,
+	// not a pre-computed base-prefixed path.
+	assert.Equal(t, "/per-op/v1.0/override", extProc.Fields["path"].GetStringValue())
+	assert.NotContains(t, extProc.Fields, "request_transformation.target_path")
 }
 
 // =============================================================================
