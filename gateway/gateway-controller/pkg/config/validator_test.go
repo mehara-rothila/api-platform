@@ -867,6 +867,35 @@ func TestValidateUpstreamDefinitions_MalformedTimeout(t *testing.T) {
 	assert.Contains(t, errors[0].Message, "Invalid timeout format")
 }
 
+func TestValidateUpstreamDefinitions_TimeoutUnitContract(t *testing.T) {
+	validator := NewAPIValidator()
+
+	// time.ParseDuration accepts units outside the ms|s|m|h contract (ns, us, compounds);
+	// these must be rejected as invalid format, not silently accepted.
+	for _, badTimeout := range []string{"5ns", "100us", "1h30m"} {
+		connect := badTimeout
+		definitions := &[]api.UpstreamDefinition{
+			{
+				Name: "my-upstream",
+				Timeout: &api.UpstreamTimeout{
+					Connect: &connect,
+				},
+				Upstreams: []struct {
+					Url    string `json:"url" yaml:"url"`
+					Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+				}{
+					{Url: "http://backend:8080"},
+				},
+			},
+		}
+
+		errors := validator.validateUpstreamDefinitions(definitions)
+		require.Len(t, errors, 1, "timeout %q must be rejected", badTimeout)
+		assert.Equal(t, "spec.upstreamDefinitions[0].timeout.connect", errors[0].Field)
+		assert.Contains(t, errors[0].Message, "Invalid timeout format")
+	}
+}
+
 func TestValidateUpstreamRef_ValidRef(t *testing.T) {
 	validator := NewAPIValidator()
 

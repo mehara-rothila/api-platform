@@ -39,6 +39,8 @@ type APIValidator struct {
 	urlFriendlyNameRegex *regexp.Regexp
 	// upstreamRefRegex enforces the schema pattern for per-op upstream refs
 	upstreamRefRegex *regexp.Regexp
+	// connectTimeoutRegex enforces the ms|s|m|h unit contract for upstream connect timeouts
+	connectTimeoutRegex *regexp.Regexp
 	// policyValidator validates policy references and parameters
 	policyValidator *PolicyValidator
 }
@@ -50,6 +52,7 @@ func NewAPIValidator() *APIValidator {
 		versionRegex:         regexp.MustCompile(`^v?\d+(\.\d+)?(\.\d+)?$`),
 		urlFriendlyNameRegex: regexp.MustCompile(`^[a-zA-Z0-9\-_\. ]+$`),
 		upstreamRefRegex:     regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`),
+		connectTimeoutRegex:  regexp.MustCompile(`^[+-]?\d+(\.\d+)?(ms|s|m|h)$`),
 	}
 }
 
@@ -382,6 +385,11 @@ func (v *APIValidator) validateUpstreamDefinitions(definitions *[]api.UpstreamDe
 					errors = append(errors, ValidationError{
 						Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].timeout.connect", i),
 						Message: fmt.Sprintf("Invalid timeout format: %v (expected format: '30s', '1m', '500ms')", err),
+					})
+				} else if !v.connectTimeoutRegex.MatchString(timeoutStr) {
+					errors = append(errors, ValidationError{
+						Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].timeout.connect", i),
+						Message: fmt.Sprintf("Invalid timeout format: %q (expected units: ms, s, m, h)", timeoutStr),
 					})
 				} else if d <= 0 {
 					errors = append(errors, ValidationError{
