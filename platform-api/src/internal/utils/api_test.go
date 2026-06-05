@@ -19,6 +19,7 @@ package utils
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -654,3 +655,250 @@ func TestBuildAPIDeploymentYAML(t *testing.T) {
 	}
 }
 
+// TestBuildAPIDeploymentYAML_EmitsUpstreamDefinitions verifies the reusable upstream pool is
+// emitted into the deployment YAML (the gateway resolves refs against it).
+func TestBuildAPIDeploymentYAML_EmitsUpstreamDefinitions(t *testing.T) {
+	util := &APIUtil{}
+	ctx := "/test"
+	weight := 80
+	apiModel := &model.API{
+		Name:    "Pool API",
+		Handle:  "pool-api",
+		Version: "v1.0",
+		Kind:    constants.RestApi,
+		Configuration: model.RestAPIConfig{
+			Context:  &ctx,
+			Upstream: model.UpstreamConfig{Main: &model.UpstreamEndpoint{URL: "http://main:8080"}},
+			UpstreamDefinitions: []model.UpstreamDefinition{
+				{
+					Name:      "alt-backend",
+					BasePath:  "/api/v2",
+					Timeout:   &model.UpstreamTimeout{Connect: "5s"},
+					Upstreams: []model.UpstreamBackend{{URL: "http://alt:9090", Weight: &weight}},
+				},
+			},
+			Operations: []model.Operation{
+				{Request: &model.OperationRequest{Method: "GET", Path: "/x"}},
+			},
+		},
+	}
+
+	d, err := util.BuildAPIDeploymentYAML(apiModel)
+	if err != nil {
+		t.Fatalf("BuildAPIDeploymentYAML() error = %v", err)
+	}
+	if len(d.Spec.UpstreamDefinitions) != 1 {
+		t.Fatalf("expected 1 upstreamDefinition, got %d", len(d.Spec.UpstreamDefinitions))
+	}
+	got := d.Spec.UpstreamDefinitions[0]
+	if got.Name != "alt-backend" || got.BasePath != "/api/v2" {
+		t.Errorf("got name=%q basePath=%q, want alt-backend // /api/v2", got.Name, got.BasePath)
+	}
+	if got.Timeout == nil || got.Timeout.Connect != "5s" {
+		t.Errorf("Timeout = %+v, want connect 5s", got.Timeout)
+	}
+	if len(got.Upstreams) != 1 || got.Upstreams[0].URL != "http://alt:9090" ||
+		got.Upstreams[0].Weight == nil || *got.Upstreams[0].Weight != 80 {
+		t.Errorf("Upstreams = %+v, want url http://alt:9090 weight 80", got.Upstreams)
+	}
+
+	out, err := yaml.Marshal(d)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error = %v", err)
+	}
+	if !strings.Contains(string(out), "upstreamDefinitions:") || !strings.Contains(string(out), "alt-backend") {
+		t.Errorf("emitted YAML missing upstreamDefinitions/alt-backend:\n%s", out)
+	}
+}
+
+// TestBuildAPIDeploymentYAML_EmitsPerOpUpstreamRef verifies a per-operation upstream ref is
+// emitted into the operation in the deployment YAML.
+func TestBuildAPIDeploymentYAML_EmitsPerOpUpstreamRef(t *testing.T) {
+	util := &APIUtil{}
+	ctx := "/test"
+	apiModel := &model.API{
+		Name:    "PerOp API",
+		Handle:  "perop-api",
+		Version: "v1.0",
+		Kind:    constants.RestApi,
+		Configuration: model.RestAPIConfig{
+			Context:  &ctx,
+			Upstream: model.UpstreamConfig{Main: &model.UpstreamEndpoint{URL: "http://main:8080"}},
+			Operations: []model.Operation{
+				{Request: &model.OperationRequest{
+					Method:   "GET",
+					Path:     "/whoami",
+					Upstream: &model.OperationUpstream{Main: &model.OperationUpstreamTarget{Ref: "alt-backend"}},
+				}},
+			},
+		},
+	}
+
+	d, err := util.BuildAPIDeploymentYAML(apiModel)
+	if err != nil {
+		t.Fatalf("BuildAPIDeploymentYAML() error = %v", err)
+	}
+	if len(d.Spec.Operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(d.Spec.Operations))
+	}
+	up := d.Spec.Operations[0].Upstream
+	if up == nil || up.Main == nil {
+		t.Fatalf("expected per-op upstream.main, got %+v", up)
+	}
+	if up.Main.Ref != "alt-backend" {
+		t.Errorf("per-op main ref = %q, want alt-backend", up.Main.Ref)
+	}
+
+	out, err := yaml.Marshal(d)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error = %v", err)
+	}
+	if !strings.Contains(string(out), "ref: alt-backend") {
+		t.Errorf("emitted YAML missing per-op ref:\n%s", out)
+	}
+}
+
+// TestAPIYAMLDataToRESTAPI_PreservesPoolAndPerOp guards the YAML->model round-trip (GAP-3).
+func TestAPIYAMLDataToRESTAPI_PreservesPoolAndPerOp(t *testing.T) {
+	util := &APIUtil{}
+	yamlData := &dto.APIYAMLData{
+		DisplayName: "x",
+		Context:     "/x",
+		Version:     "v1",
+		UpstreamDefinitions: []dto.UpstreamDefinitionYAML{
+			{Name: "alt-backend", BasePath: "/alternate", Upstreams: []dto.UpstreamBackendYAML{{URL: "http://b:8080"}}},
+		},
+		Operations: []api.OperationRequest{
+			{Method: api.OperationRequestMethodGET, Path: "/whoami",
+				Upstream: &api.OperationUpstream{Main: &api.OperationUpstreamTarget{Ref: "alt-backend"}}},
+		},
+	}
+	rest := util.APIYAMLDataToRESTAPI(yamlData)
+	if rest.UpstreamDefinitions == nil || len(*rest.UpstreamDefinitions) != 1 || (*rest.UpstreamDefinitions)[0].Name != "alt-backend" {
+		t.Errorf("pool dropped in APIYAMLDataToRESTAPI: %+v", rest.UpstreamDefinitions)
+	}
+	if rest.Operations == nil || len(*rest.Operations) != 1 {
+		t.Fatalf("operations missing")
+	}
+	up := (*rest.Operations)[0].Request.Upstream
+	if up == nil || up.Main == nil || up.Main.Ref != "alt-backend" {
+		t.Errorf("per-op upstream dropped in APIYAMLDataToRESTAPI: %+v", up)
+	}
+}
+
+// TestMergeRESTAPIDetails_PreservesPoolAndOverlaysPerOp guards the OpenAPI overlay (GAP-2): the
+// pool must survive and the user's per-op upstream must overlay onto the extracted operations.
+func TestMergeRESTAPIDetails_PreservesPoolAndOverlaysPerOp(t *testing.T) {
+	util := &APIUtil{}
+	pool := &[]api.ReusableUpstream{{Name: "alt-backend"}}
+	userAPI := &api.RESTAPI{
+		Name:                "x",
+		UpstreamDefinitions: pool,
+		Operations: &[]api.Operation{
+			{Request: api.OperationRequest{Method: api.OperationRequestMethodGET, Path: "/whoami",
+				Upstream: &api.OperationUpstream{Main: &api.OperationUpstreamTarget{Ref: "alt-backend"}}}},
+		},
+	}
+	extractedAPI := &api.RESTAPI{
+		Name: "x",
+		Operations: &[]api.Operation{
+			{Request: api.OperationRequest{Method: api.OperationRequestMethodGET, Path: "/whoami"}},
+			{Request: api.OperationRequest{Method: api.OperationRequestMethodGET, Path: "/ping"}},
+		},
+	}
+	merged := util.MergeRESTAPIDetails(userAPI, extractedAPI)
+	if merged.UpstreamDefinitions == nil || len(*merged.UpstreamDefinitions) != 1 {
+		t.Errorf("pool dropped in MergeRESTAPIDetails: %+v", merged.UpstreamDefinitions)
+	}
+	if merged.Operations == nil || len(*merged.Operations) != 2 {
+		t.Fatalf("expected 2 merged operations, got %v", merged.Operations)
+	}
+	var whoami, ping *api.OperationUpstream
+	for _, op := range *merged.Operations {
+		switch op.Request.Path {
+		case "/whoami":
+			whoami = op.Request.Upstream
+		case "/ping":
+			ping = op.Request.Upstream
+		}
+	}
+	if whoami == nil || whoami.Main == nil || whoami.Main.Ref != "alt-backend" {
+		t.Errorf("/whoami per-op upstream not overlaid: %+v", whoami)
+	}
+	if ping != nil {
+		t.Errorf("/ping should have no per-op upstream, got %+v", ping)
+	}
+}
+
+// TestBuildAPIDeploymentYAML_FullPerOpRefContract asserts the complete deployment-YAML shape the
+// gateway must accept for the canonical scenario: a reusable pool, an API-level ref, a per-op ref
+// override, and a fallback operation. (A live platform->gateway e2e belongs in the gateway IT.)
+func TestBuildAPIDeploymentYAML_FullPerOpRefContract(t *testing.T) {
+	util := &APIUtil{}
+	ctx := "/test"
+	apiModel := &model.API{
+		Name:    "Full API",
+		Handle:  "full-api",
+		Version: "v1.0",
+		Kind:    constants.RestApi,
+		Configuration: model.RestAPIConfig{
+			Context:  &ctx,
+			Upstream: model.UpstreamConfig{Main: &model.UpstreamEndpoint{Ref: "alt-backend"}},
+			UpstreamDefinitions: []model.UpstreamDefinition{
+				{Name: "alt-backend", BasePath: "/alternate", Upstreams: []model.UpstreamBackend{{URL: "http://alt:9090"}}},
+			},
+			Operations: []model.Operation{
+				{Request: &model.OperationRequest{Method: "GET", Path: "/whoami",
+					Upstream: &model.OperationUpstream{Main: &model.OperationUpstreamTarget{Ref: "alt-backend"}}}},
+				{Request: &model.OperationRequest{Method: "GET", Path: "/ping"}},
+			},
+		},
+	}
+	d, err := util.BuildAPIDeploymentYAML(apiModel)
+	if err != nil {
+		t.Fatalf("BuildAPIDeploymentYAML() error = %v", err)
+	}
+	out, err := yaml.Marshal(d)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error = %v", err)
+	}
+
+	// Round-trip back into the typed deployment DTO and assert structure (not just
+	// substrings) so a ref attached to the wrong operation can't slip through.
+	var got dto.APIDeploymentYAML
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal error = %v\n%s", err, out)
+	}
+	spec := got.Spec
+
+	if len(spec.UpstreamDefinitions) != 1 {
+		t.Fatalf("expected 1 upstreamDefinition, got %d:\n%s", len(spec.UpstreamDefinitions), out)
+	}
+	def := spec.UpstreamDefinitions[0]
+	if def.Name != "alt-backend" || def.BasePath != "/alternate" {
+		t.Errorf("pool definition mismatch: %+v", def)
+	}
+	if len(def.Upstreams) != 1 || def.Upstreams[0].URL != "http://alt:9090" {
+		t.Errorf("pool backends mismatch: %+v", def.Upstreams)
+	}
+
+	// Per-op ref must be attached to /whoami, and /ping must carry no upstream override.
+	byPath := make(map[string]api.OperationRequest, len(spec.Operations))
+	for _, op := range spec.Operations {
+		byPath[op.Path] = op
+	}
+	whoami, ok := byPath["/whoami"]
+	if !ok {
+		t.Fatalf("operation /whoami missing from emitted YAML:\n%s", out)
+	}
+	if whoami.Upstream == nil || whoami.Upstream.Main == nil || whoami.Upstream.Main.Ref != "alt-backend" {
+		t.Errorf("/whoami should ref alt-backend, got %+v", whoami.Upstream)
+	}
+	ping, ok := byPath["/ping"]
+	if !ok {
+		t.Fatalf("operation /ping missing from emitted YAML:\n%s", out)
+	}
+	if ping.Upstream != nil {
+		t.Errorf("/ping must not inherit a per-op upstream, got %+v", ping.Upstream)
+	}
+}

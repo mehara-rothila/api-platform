@@ -514,3 +514,75 @@ func TestAPIRepo_CreateAndRead_FullConfiguration(t *testing.T) {
 	}
 }
 
+// TestAPIRepo_CreateAndRead_PreservesUpstreamDefinitionsAndPerOp is an integration test that
+// stores an API carrying a reusable upstream pool and a per-operation upstream ref to a real
+// SQLite database, reads it back, and asserts both survive the configuration JSON-blob round-trip.
+func TestAPIRepo_CreateAndRead_PreservesUpstreamDefinitionsAndPerOp(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	t.Cleanup(cleanup)
+
+	repo := NewAPIRepo(db)
+
+	orgUUID := "org-perop-001"
+	projectUUID := "project-perop-001"
+	createTestOrganizationAndProject(t, db, orgUUID, projectUUID)
+
+	weight := 80
+	api := &model.API{
+		Handle:         "perop-ref-api",
+		Name:           "Per-Op Ref API",
+		Version:        "1.0.0",
+		ProjectID:      projectUUID,
+		OrganizationID: orgUUID,
+		Configuration: model.RestAPIConfig{
+			Name:    "Per-Op Ref API",
+			Version: "1.0.0",
+			Context: strPtr("/perop"),
+			Upstream: model.UpstreamConfig{
+				Main: &model.UpstreamEndpoint{Ref: "alt-backend"},
+			},
+			UpstreamDefinitions: []model.UpstreamDefinition{
+				{
+					Name:      "alt-backend",
+					BasePath:  "/alternate",
+					Timeout:   &model.UpstreamTimeout{Connect: "5s"},
+					Upstreams: []model.UpstreamBackend{{URL: "http://alt:9090", Weight: &weight}},
+				},
+			},
+			Operations: []model.Operation{
+				{
+					Name: "Whoami",
+					Request: &model.OperationRequest{
+						Method:   "GET",
+						Path:     "/whoami",
+						Upstream: &model.OperationUpstream{Main: &model.OperationUpstreamTarget{Ref: "alt-backend"}},
+					},
+				},
+			},
+		},
+	}
+
+	if err := repo.CreateAPI(api); err != nil {
+		t.Fatalf("CreateAPI failed: %v", err)
+	}
+	defer func() {
+		if err := repo.DeleteAPI(api.ID, orgUUID); err != nil {
+			t.Errorf("DeleteAPI cleanup failed: %v", err)
+		}
+	}()
+
+	created, err := repo.GetAPIByUUID(api.ID, orgUUID)
+	if err != nil {
+		t.Fatalf("GetAPIByUUID failed: %v", err)
+	}
+	if created == nil {
+		t.Fatal("GetAPIByUUID returned nil")
+	}
+
+	// The whole config — including upstreamDefinitions and per-op upstream — must survive the
+	// database JSON round-trip (this is the persistence path the ingest fixes feed into).
+	if !reflect.DeepEqual(created.Configuration, api.Configuration) {
+		t.Fatalf("config mismatch after DB round-trip.\nexpected=%+v\nactual=%+v", api.Configuration, created.Configuration)
+	}
+}
+

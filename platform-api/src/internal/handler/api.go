@@ -159,6 +159,18 @@ func (h *APIHandler) CreateAPI(c *gin.Context) {
 				err.Error()))
 			return
 		}
+		if errors.Is(err, constants.ErrInvalidUpstreamDefinition) {
+			h.slogger.Error("Invalid upstream definition", "organizationId", orgId, "error", err)
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				err.Error()))
+			return
+		}
+		if errors.Is(err, constants.ErrInvalidOperation) {
+			h.slogger.Error("Invalid operation", "organizationId", orgId, "error", err)
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				err.Error()))
+			return
+		}
 		h.slogger.Error("Failed to create API", "organizationId", orgId, "error", err)
 		c.JSON(http.StatusInternalServerError, utils.NewErrorResponse(500, "Internal Server Error",
 			"Failed to create API"))
@@ -306,6 +318,18 @@ func (h *APIHandler) UpdateAPI(c *gin.Context) {
 		}
 		if errors.Is(err, constants.ErrSubscriptionPlanNotFoundOrInactive) {
 			h.slogger.Error("Subscription plan not found or not active", "apiId", apiId, "organizationId", orgId, "error", err)
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				err.Error()))
+			return
+		}
+		if errors.Is(err, constants.ErrInvalidUpstreamDefinition) {
+			h.slogger.Error("Invalid upstream definition", "apiId", apiId, "organizationId", orgId, "error", err)
+			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+				err.Error()))
+			return
+		}
+		if errors.Is(err, constants.ErrInvalidOperation) {
+			h.slogger.Error("Invalid operation", "apiId", apiId, "organizationId", orgId, "error", err)
 			c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 				err.Error()))
 			return

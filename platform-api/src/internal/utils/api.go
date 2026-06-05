@@ -97,13 +97,14 @@ func (u *APIUtil) RESTAPIToModel(restAPI *api.RESTAPI, orgID string) *model.API 
 		Transport:       transport,
 		Channels:        u.ChannelsAPIToModel(restAPI.Channels),
 		Configuration: model.RestAPIConfig{
-			Name:              restAPI.Name,
-			Version:           restAPI.Version,
-			Context:           &restAPI.Context,
-			Upstream:          *u.UpstreamConfigAPIToModel(&restAPI.Upstream),
-			Policies:          u.PoliciesAPIToModel(restAPI.Policies),
-			Operations:        u.OperationsAPIToModel(restAPI.Operations),
-			SubscriptionPlans: stringSliceValue(restAPI.SubscriptionPlans),
+			Name:                restAPI.Name,
+			Version:             restAPI.Version,
+			Context:             &restAPI.Context,
+			Upstream:            *u.UpstreamConfigAPIToModel(&restAPI.Upstream),
+			Policies:            u.PoliciesAPIToModel(restAPI.Policies),
+			Operations:          u.OperationsAPIToModel(restAPI.Operations),
+			UpstreamDefinitions: u.UpstreamDefinitionsAPIToModel(restAPI.UpstreamDefinitions),
+			SubscriptionPlans:   stringSliceValue(restAPI.SubscriptionPlans),
 		},
 	}
 
@@ -136,23 +137,24 @@ func (u *APIUtil) ModelToRESTAPI(modelAPI *model.API) (*api.RESTAPI, error) {
 	}
 
 	return &api.RESTAPI{
-		Channels:          u.ChannelsModelToAPI(modelAPI.Channels),
-		Context:           defaultStringPtr(modelAPI.Configuration.Context),
-		CreatedAt:         TimePtrIfNotZero(modelAPI.CreatedAt),
-		CreatedBy:         StringPtrIfNotEmpty(modelAPI.CreatedBy),
-		Description:       StringPtrIfNotEmpty(modelAPI.Description),
-		Id:                StringPtrIfNotEmpty(modelAPI.Handle),
-		Kind:              StringPtrIfNotEmpty(modelAPI.Kind),
-		LifeCycleStatus:   status,
-		Name:              modelAPI.Name,
-		Operations:        u.OperationsModelToAPI(modelAPI.Configuration.Operations),
-		Policies:          u.PoliciesModelToAPI(modelAPI.Configuration.Policies),
-		ProjectId:         *projectID,
-		SubscriptionPlans: stringSlicePtr(modelAPI.Configuration.SubscriptionPlans),
-		Transport:         stringSlicePtr(modelAPI.Transport),
-		UpdatedAt:         TimePtrIfNotZero(modelAPI.UpdatedAt),
-		Upstream:          u.UpstreamConfigModelToAPI(&modelAPI.Configuration.Upstream),
-		Version:           modelAPI.Version,
+		Channels:            u.ChannelsModelToAPI(modelAPI.Channels),
+		Context:             defaultStringPtr(modelAPI.Configuration.Context),
+		CreatedAt:           TimePtrIfNotZero(modelAPI.CreatedAt),
+		CreatedBy:           StringPtrIfNotEmpty(modelAPI.CreatedBy),
+		Description:         StringPtrIfNotEmpty(modelAPI.Description),
+		Id:                  StringPtrIfNotEmpty(modelAPI.Handle),
+		Kind:                StringPtrIfNotEmpty(modelAPI.Kind),
+		LifeCycleStatus:     status,
+		Name:                modelAPI.Name,
+		Operations:          u.OperationsModelToAPI(modelAPI.Configuration.Operations),
+		Policies:            u.PoliciesModelToAPI(modelAPI.Configuration.Policies),
+		ProjectId:           *projectID,
+		SubscriptionPlans:   stringSlicePtr(modelAPI.Configuration.SubscriptionPlans),
+		Transport:           stringSlicePtr(modelAPI.Transport),
+		UpdatedAt:           TimePtrIfNotZero(modelAPI.UpdatedAt),
+		Upstream:            u.UpstreamConfigModelToAPI(&modelAPI.Configuration.Upstream),
+		UpstreamDefinitions: u.UpstreamDefinitionsModelToAPI(modelAPI.Configuration.UpstreamDefinitions),
+		Version:             modelAPI.Version,
 	}, nil
 }
 
@@ -256,6 +258,7 @@ func (u *APIUtil) OperationRequestAPIToModel(req *api.OperationRequest) *model.O
 		Method:   string(req.Method),
 		Path:     req.Path,
 		Policies: u.PoliciesAPIToModel(req.Policies),
+		Upstream: u.operationUpstreamAPIToModel(req.Upstream),
 	}
 }
 
@@ -333,6 +336,81 @@ func (u *APIUtil) upstreamAuthToModel(auth *api.UpstreamAuth) *model.UpstreamAut
 	return modelAuth
 }
 
+// UpstreamDefinitionsAPIToModel converts the API-level reusable upstream pool to model.
+func (u *APIUtil) UpstreamDefinitionsAPIToModel(defs *[]api.ReusableUpstream) []model.UpstreamDefinition {
+	if defs == nil {
+		return nil
+	}
+	result := make([]model.UpstreamDefinition, 0, len(*defs))
+	for _, def := range *defs {
+		md := model.UpstreamDefinition{Name: def.Name}
+		if def.BasePath != nil {
+			md.BasePath = *def.BasePath
+		}
+		if def.Timeout != nil && def.Timeout.Connect != nil {
+			md.Timeout = &model.UpstreamTimeout{Connect: *def.Timeout.Connect}
+		}
+		for _, b := range def.Upstreams {
+			md.Upstreams = append(md.Upstreams, model.UpstreamBackend{URL: b.Url, Weight: b.Weight})
+		}
+		result = append(result, md)
+	}
+	return result
+}
+
+// UpstreamDefinitionsModelToAPI converts the model reusable upstream pool to the API type.
+func (u *APIUtil) UpstreamDefinitionsModelToAPI(defs []model.UpstreamDefinition) *[]api.ReusableUpstream {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]api.ReusableUpstream, 0, len(defs))
+	for _, def := range defs {
+		ru := api.ReusableUpstream{Name: def.Name}
+		ru.BasePath = StringPtrIfNotEmpty(def.BasePath)
+		if def.Timeout != nil && def.Timeout.Connect != "" {
+			ru.Timeout = &api.UpstreamTimeout{Connect: StringPtrIfNotEmpty(def.Timeout.Connect)}
+		}
+		for _, b := range def.Upstreams {
+			ru.Upstreams = append(ru.Upstreams, struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{Url: b.URL, Weight: b.Weight})
+		}
+		result = append(result, ru)
+	}
+	return &result
+}
+
+// operationUpstreamAPIToModel converts a per-operation upstream override (ref-only) to model.
+func (u *APIUtil) operationUpstreamAPIToModel(up *api.OperationUpstream) *model.OperationUpstream {
+	if up == nil {
+		return nil
+	}
+	out := &model.OperationUpstream{}
+	if up.Main != nil {
+		out.Main = &model.OperationUpstreamTarget{Ref: up.Main.Ref}
+	}
+	if up.Sandbox != nil {
+		out.Sandbox = &model.OperationUpstreamTarget{Ref: up.Sandbox.Ref}
+	}
+	return out
+}
+
+// operationUpstreamModelToAPI converts a per-operation upstream override (ref-only) to the API type.
+func (u *APIUtil) operationUpstreamModelToAPI(up *model.OperationUpstream) *api.OperationUpstream {
+	if up == nil {
+		return nil
+	}
+	out := &api.OperationUpstream{}
+	if up.Main != nil {
+		out.Main = &api.OperationUpstreamTarget{Ref: up.Main.Ref}
+	}
+	if up.Sandbox != nil {
+		out.Sandbox = &api.OperationUpstreamTarget{Ref: up.Sandbox.Ref}
+	}
+	return out
+}
+
 // Model to API conversion helpers
 
 func (u *APIUtil) OperationsModelToAPI(models []model.Operation) *[]api.Operation {
@@ -397,6 +475,7 @@ func (u *APIUtil) OperationRequestModelToAPI(modelReq *model.OperationRequest) *
 		Method:   api.OperationRequestMethod(modelReq.Method),
 		Path:     modelReq.Path,
 		Policies: u.PoliciesModelToAPI(modelReq.Policies),
+		Upstream: u.operationUpstreamModelToAPI(modelReq.Upstream),
 	}
 }
 
@@ -488,6 +567,7 @@ func (u *APIUtil) BuildAPIDeploymentYAML(apiModel *model.API) (*dto.APIDeploymen
 			Method:   api.OperationRequestMethod(op.Request.Method),
 			Path:     op.Request.Path,
 			Policies: u.PoliciesModelToAPI(op.Request.Policies),
+			Upstream: u.operationUpstreamModelToAPI(op.Request.Upstream),
 		})
 	}
 	channelList := make([]api.ChannelRequest, 0)
@@ -523,6 +603,26 @@ func (u *APIUtil) BuildAPIDeploymentYAML(apiModel *model.API) (*dto.APIDeploymen
 		}
 	}
 
+	// Convert reusable upstream definitions (the named pool that API-level and
+	// operation-level upstream refs resolve against on the gateway).
+	var upstreamDefsYAML []dto.UpstreamDefinitionYAML
+	for _, def := range apiModel.Configuration.UpstreamDefinitions {
+		defYAML := dto.UpstreamDefinitionYAML{
+			Name:     def.Name,
+			BasePath: def.BasePath,
+		}
+		if def.Timeout != nil {
+			defYAML.Timeout = &dto.UpstreamTimeoutYAML{Connect: def.Timeout.Connect}
+		}
+		for _, b := range def.Upstreams {
+			defYAML.Upstreams = append(defYAML.Upstreams, dto.UpstreamBackendYAML{
+				URL:    b.URL,
+				Weight: b.Weight,
+			})
+		}
+		upstreamDefsYAML = append(upstreamDefsYAML, defYAML)
+	}
+
 	apiYAMLData := dto.APIYAMLData{}
 	apiYAMLData.DisplayName = apiModel.Name
 	apiYAMLData.Version = apiModel.Version
@@ -534,6 +634,7 @@ func (u *APIUtil) BuildAPIDeploymentYAML(apiModel *model.API) (*dto.APIDeploymen
 	switch apiModel.Kind {
 	case constants.RestApi:
 		apiYAMLData.Upstream = upstreamYAML
+		apiYAMLData.UpstreamDefinitions = upstreamDefsYAML
 		apiYAMLData.Operations = operationList
 	case constants.WebSubApi:
 		apiYAMLData.Channels = channelList
@@ -750,6 +851,31 @@ func (u *APIUtil) buildParameters(path string) []dto.Parameter {
 //
 // Returns:
 //   - *api.RESTAPI: Converted generated RESTAPI model with mapped fields
+//
+// UpstreamDefinitionsYAMLToAPI converts the deployment-YAML pool DTOs to the API
+// ReusableUpstream type (used when importing an API from a deployment YAML / project artifact).
+func (u *APIUtil) UpstreamDefinitionsYAMLToAPI(defs []dto.UpstreamDefinitionYAML) *[]api.ReusableUpstream {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]api.ReusableUpstream, 0, len(defs))
+	for _, def := range defs {
+		ru := api.ReusableUpstream{Name: def.Name}
+		ru.BasePath = StringPtrIfNotEmpty(def.BasePath)
+		if def.Timeout != nil && def.Timeout.Connect != "" {
+			ru.Timeout = &api.UpstreamTimeout{Connect: StringPtrIfNotEmpty(def.Timeout.Connect)}
+		}
+		for _, b := range def.Upstreams {
+			ru.Upstreams = append(ru.Upstreams, struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{Url: b.URL, Weight: b.Weight})
+		}
+		result = append(result, ru)
+	}
+	return &result
+}
+
 func (u *APIUtil) APIYAMLDataToRESTAPI(yamlData *dto.APIYAMLData) *api.RESTAPI {
 	if yamlData == nil {
 		return nil
@@ -771,6 +897,7 @@ func (u *APIUtil) APIYAMLDataToRESTAPI(yamlData *dto.APIYAMLData) *api.RESTAPI {
 					Method:   op.Method,
 					Path:     op.Path,
 					Policies: policies,
+					Upstream: op.Upstream,
 				},
 			}
 		}
@@ -823,17 +950,18 @@ func (u *APIUtil) APIYAMLDataToRESTAPI(yamlData *dto.APIYAMLData) *api.RESTAPI {
 
 	// Create and populate generated RESTAPI model with available fields
 	restAPI := &api.RESTAPI{
-		Name:            yamlData.DisplayName,
-		Context:         yamlData.Context,
-		Version:         yamlData.Version,
-		Operations:      &operations,
-		Channels:        &channels,
-		Policies:        u.PoliciesModelToAPI(u.PoliciesDTOToModel(yamlData.Policies)),
-		Upstream:        upstream,
-		LifeCycleStatus: &lifeCycleStatus,
-		Kind:            StringPtrIfNotEmpty(kind),
-		Transport:       stringSlicePtr([]string{"http", "https"}),
-		ProjectId:       openapi_types.UUID{},
+		Name:                yamlData.DisplayName,
+		Context:             yamlData.Context,
+		Version:             yamlData.Version,
+		Operations:          &operations,
+		Channels:            &channels,
+		Policies:            u.PoliciesModelToAPI(u.PoliciesDTOToModel(yamlData.Policies)),
+		Upstream:            upstream,
+		UpstreamDefinitions: u.UpstreamDefinitionsYAMLToAPI(yamlData.UpstreamDefinitions),
+		LifeCycleStatus:     &lifeCycleStatus,
+		Kind:                StringPtrIfNotEmpty(kind),
+		Transport:           stringSlicePtr([]string{"http", "https"}),
+		ProjectId:           openapi_types.UUID{},
 
 		// Fields that may be set by caller:
 		// - Id
@@ -1361,18 +1489,57 @@ func (u *APIUtil) MergeRESTAPIDetails(userAPI *api.RESTAPI, extractedAPI *api.RE
 		merged.Upstream = extractedAPI.Upstream
 	}
 
+	// UpstreamDefinitions: prefer the user-provided reusable pool
+	if userAPI.UpstreamDefinitions != nil && len(*userAPI.UpstreamDefinitions) > 0 {
+		merged.UpstreamDefinitions = userAPI.UpstreamDefinitions
+	} else {
+		merged.UpstreamDefinitions = extractedAPI.UpstreamDefinitions
+	}
+
 	// Policies/channels are only from user input
 	merged.Policies = userAPI.Policies
 	merged.Channels = userAPI.Channels
 
-	// Operations: prefer extracted ops when available
+	// Operations: prefer extracted ops (from the OpenAPI/artifact), but overlay the user's
+	// per-operation upstream overrides by method+path, since extracted ops never carry them.
 	if extractedAPI.Operations != nil && len(*extractedAPI.Operations) > 0 {
-		merged.Operations = extractedAPI.Operations
+		merged.Operations = overlayPerOpUpstream(extractedAPI.Operations, userAPI.Operations)
 	} else {
 		merged.Operations = userAPI.Operations
 	}
 
 	return merged
+}
+
+// overlayPerOpUpstream returns baseOps with each operation's per-op Upstream taken from
+// overrideOps where a matching METHOD+path exists. Method matching is case-insensitive so a
+// lowercase user method does not silently drop the override.
+func overlayPerOpUpstream(baseOps *[]api.Operation, overrideOps *[]api.Operation) *[]api.Operation {
+	if baseOps == nil {
+		return overrideOps
+	}
+	if overrideOps == nil || len(*overrideOps) == 0 {
+		return baseOps
+	}
+	byKey := make(map[string]*api.OperationUpstream)
+	for i := range *overrideOps {
+		op := (*overrideOps)[i]
+		if op.Request.Upstream == nil {
+			continue
+		}
+		byKey[strings.ToUpper(string(op.Request.Method))+" "+op.Request.Path] = op.Request.Upstream
+	}
+	if len(byKey) == 0 {
+		return baseOps
+	}
+	ops := make([]api.Operation, len(*baseOps))
+	copy(ops, *baseOps)
+	for i := range ops {
+		if up, ok := byKey[strings.ToUpper(string(ops[i].Request.Method))+" "+ops[i].Request.Path]; ok {
+			ops[i].Request.Upstream = up
+		}
+	}
+	return &ops
 }
 
 func isEmptyUpstreamAPI(upstream api.Upstream) bool {

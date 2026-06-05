@@ -67,6 +67,8 @@ var (
 	ErrGatewayNotAssociated        = errors.New("api is not associated with gateway")
 	ErrAPIContextVersionConflict   = errors.New("api with same context and version already deployed in gateway")
 	ErrUpstreamRequired            = errors.New("upstream configuration is required")
+	ErrInvalidUpstreamDefinition   = errors.New("invalid upstream definition")
+	ErrInvalidOperation            = errors.New("invalid operation")
 )
 
 var (

@@ -1006,7 +1006,10 @@ type CreateRESTAPIRequest struct {
 
 	// Upstream Upstream backend configuration with main and sandbox endpoints
 	Upstream Upstream `json:"upstream" yaml:"upstream"`
-	Version  string   `binding:"required" json:"version" yaml:"version"`
+
+	// UpstreamDefinitions Reusable named upstream definitions. API-level and operation-level `upstream.ref` values resolve against entries here by name.
+	UpstreamDefinitions *[]ReusableUpstream `json:"upstreamDefinitions,omitempty" yaml:"upstreamDefinitions,omitempty"`
+	Version             string              `binding:"required" json:"version" yaml:"version"`
 }
 
 // CreateRESTAPIRequestLifeCycleStatus Current lifecycle status of the API
@@ -1532,7 +1535,10 @@ type ImportAPIProjectRequest struct {
 
 		// Upstream Upstream backend configuration with main and sandbox endpoints
 		Upstream Upstream `json:"upstream" yaml:"upstream"`
-		Version  string   `binding:"required" json:"version" yaml:"version"`
+
+		// UpstreamDefinitions Reusable named upstream definitions. API-level and operation-level `upstream.ref` values resolve against entries here by name.
+		UpstreamDefinitions *[]ReusableUpstream `json:"upstreamDefinitions,omitempty" yaml:"upstreamDefinitions,omitempty"`
+		Version             string              `binding:"required" json:"version" yaml:"version"`
 	} `binding:"required" json:"api" yaml:"api"`
 
 	// Branch Branch of the repository to import from
@@ -2109,7 +2115,10 @@ type OpenAPIValidationResponse struct {
 
 		// Upstream Upstream backend configuration with main and sandbox endpoints
 		Upstream Upstream `json:"upstream" yaml:"upstream"`
-		Version  string   `binding:"required" json:"version" yaml:"version"`
+
+		// UpstreamDefinitions Reusable named upstream definitions. API-level and operation-level `upstream.ref` values resolve against entries here by name.
+		UpstreamDefinitions *[]ReusableUpstream `json:"upstreamDefinitions,omitempty" yaml:"upstreamDefinitions,omitempty"`
+		Version             string              `binding:"required" json:"version" yaml:"version"`
 	} `json:"api,omitempty" yaml:"api,omitempty"`
 
 	// Errors List of validation errors encountered
@@ -2144,10 +2153,35 @@ type OperationRequest struct {
 
 	// Policies List of policies to be applied on the operation
 	Policies *[]Policy `json:"policies,omitempty" yaml:"policies,omitempty"`
+
+	// Upstream Per-operation upstream override with main and sandbox sub-fields.
+	Upstream *OperationUpstream `json:"upstream,omitempty" yaml:"upstream,omitempty"`
 }
 
 // OperationRequestMethod HTTP method for the operation
 type OperationRequestMethod string
+
+// OperationUpstream Per-operation upstream override. Each sub-field must reference a named entry in upstreamDefinitions. Missing sub-fields fall back to the API-level upstream. At least one of main or sandbox must be set.
+type OperationUpstream struct {
+	// Main Production vhost override. Must reference a named upstreamDefinition.
+	Main *OperationUpstreamTarget `json:"main,omitempty" yaml:"main,omitempty"`
+
+	// Sandbox Sandbox vhost override. Must reference a named upstreamDefinition.
+	Sandbox *OperationUpstreamTarget `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+	union   json.RawMessage
+}
+
+// OperationUpstream0 defines model for .
+type OperationUpstream0 = interface{}
+
+// OperationUpstream1 defines model for .
+type OperationUpstream1 = interface{}
+
+// OperationUpstreamTarget A ref-only upstream pointer for operation-level overrides. URLs are not permitted at the operation level; all backend URLs must be declared in upstreamDefinitions and referenced by name.
+type OperationUpstreamTarget struct {
+	// Ref Name of a predefined upstream declared in upstreamDefinitions.
+	Ref string `binding:"required" json:"ref" yaml:"ref"`
+}
 
 // Organization defines model for Organization.
 type Organization struct {
@@ -2362,7 +2396,10 @@ type RESTAPI struct {
 
 	// Upstream Upstream backend configuration with main and sandbox endpoints
 	Upstream Upstream `json:"upstream" yaml:"upstream"`
-	Version  string   `binding:"required" json:"version" yaml:"version"`
+
+	// UpstreamDefinitions Reusable named upstream definitions. API-level and operation-level `upstream.ref` values resolve against entries here by name.
+	UpstreamDefinitions *[]ReusableUpstream `json:"upstreamDefinitions,omitempty" yaml:"upstreamDefinitions,omitempty"`
+	Version             string              `binding:"required" json:"version" yaml:"version"`
 }
 
 // RESTAPILifeCycleStatus Current lifecycle status of the API
@@ -2567,7 +2604,10 @@ type RESTAPIProjectValidationResponse struct {
 
 		// Upstream Upstream backend configuration with main and sandbox endpoints
 		Upstream Upstream `json:"upstream" yaml:"upstream"`
-		Version  string   `binding:"required" json:"version" yaml:"version"`
+
+		// UpstreamDefinitions Reusable named upstream definitions. API-level and operation-level `upstream.ref` values resolve against entries here by name.
+		UpstreamDefinitions *[]ReusableUpstream `json:"upstreamDefinitions,omitempty" yaml:"upstreamDefinitions,omitempty"`
+		Version             string              `binding:"required" json:"version" yaml:"version"`
 	} `json:"api,omitempty" yaml:"api,omitempty"`
 
 	// Errors List of validation errors encountered
@@ -2689,6 +2729,27 @@ type ResourceWiseRateLimitingConfig struct {
 
 	// Resources Explicit resource limits that override the default limit.
 	Resources []RateLimitingResourceLimit `binding:"required" json:"resources" yaml:"resources"`
+}
+
+// ReusableUpstream A reusable named upstream definition. Referenced by name from an API-level or operation-level upstream.ref. Mirrors the gateway upstreamDefinitions entry shape.
+type ReusableUpstream struct {
+	// BasePath Base path prefix prepended to all requests routed to this upstream (e.g., /api/v2)
+	BasePath *string `json:"basePath,omitempty" yaml:"basePath,omitempty"`
+
+	// Name Unique identifier for this upstream definition
+	Name string `binding:"required" json:"name" yaml:"name"`
+
+	// Timeout Timeout configuration for upstream requests
+	Timeout *UpstreamTimeout `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+
+	// Upstreams List of backend targets with optional weights for load balancing
+	Upstreams []struct {
+		// Url Backend URL (host and port; path comes from basePath)
+		Url string `json:"url" yaml:"url"`
+
+		// Weight Weight for load balancing (optional, default 100)
+		Weight *int `json:"weight,omitempty" yaml:"weight,omitempty"`
+	} `binding:"required" json:"upstreams" yaml:"upstreams"`
 }
 
 // RouteException defines model for RouteException.
@@ -3004,6 +3065,12 @@ type UpstreamDefinition0 = interface{}
 
 // UpstreamDefinition1 defines model for .
 type UpstreamDefinition1 = interface{}
+
+// UpstreamTimeout Timeout configuration for upstream requests
+type UpstreamTimeout struct {
+	// Connect Connection timeout duration (e.g., "5s", "500ms")
+	Connect *string `json:"connect,omitempty" yaml:"connect,omitempty"`
+}
 
 // UserAPIKeyItem defines model for UserAPIKeyItem.
 type UserAPIKeyItem struct {
@@ -4085,6 +4152,116 @@ func (t *ImportOpenAPIRequest) UnmarshalJSON(b []byte) error {
 		err = json.Unmarshal(raw, &t.Url)
 		if err != nil {
 			return fmt.Errorf("error reading 'url': %w", err)
+		}
+	}
+
+	return err
+}
+
+// AsOperationUpstream0 returns the union data inside the OperationUpstream as a OperationUpstream0
+func (t OperationUpstream) AsOperationUpstream0() (OperationUpstream0, error) {
+	var body OperationUpstream0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromOperationUpstream0 overwrites any union data inside the OperationUpstream as the provided OperationUpstream0
+func (t *OperationUpstream) FromOperationUpstream0(v OperationUpstream0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeOperationUpstream0 performs a merge with any union data inside the OperationUpstream, using the provided OperationUpstream0
+func (t *OperationUpstream) MergeOperationUpstream0(v OperationUpstream0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsOperationUpstream1 returns the union data inside the OperationUpstream as a OperationUpstream1
+func (t OperationUpstream) AsOperationUpstream1() (OperationUpstream1, error) {
+	var body OperationUpstream1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromOperationUpstream1 overwrites any union data inside the OperationUpstream as the provided OperationUpstream1
+func (t *OperationUpstream) FromOperationUpstream1(v OperationUpstream1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeOperationUpstream1 performs a merge with any union data inside the OperationUpstream, using the provided OperationUpstream1
+func (t *OperationUpstream) MergeOperationUpstream1(v OperationUpstream1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t OperationUpstream) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.Main != nil {
+		object["main"], err = json.Marshal(t.Main)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'main': %w", err)
+		}
+	}
+
+	if t.Sandbox != nil {
+		object["sandbox"], err = json.Marshal(t.Sandbox)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'sandbox': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *OperationUpstream) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["main"]; found {
+		err = json.Unmarshal(raw, &t.Main)
+		if err != nil {
+			return fmt.Errorf("error reading 'main': %w", err)
+		}
+	}
+
+	if raw, found := object["sandbox"]; found {
+		err = json.Unmarshal(raw, &t.Sandbox)
+		if err != nil {
+			return fmt.Errorf("error reading 'sandbox': %w", err)
 		}
 	}
 

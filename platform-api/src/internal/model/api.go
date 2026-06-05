@@ -23,31 +23,32 @@ import (
 
 // API represents an API entity in the platform
 type API struct {
-	ID              string           `json:"id" db:"uuid"`
-	Handle          string           `json:"handle" db:"handle"`
-	Name            string           `json:"name" db:"name"`
-	Kind            string           `json:"kind" db:"kind"`
-	Description     string           `json:"description,omitempty" db:"description"`
-	Version         string           `json:"version" db:"version"`
-	CreatedBy       string           `json:"createdBy,omitempty" db:"created_by"`
-	ProjectID       string           `json:"projectId" db:"project_uuid"`           // FK to Project.ID
-	OrganizationID  string           `json:"organizationId" db:"organization_uuid"` // FK to Organization.ID
-	CreatedAt       time.Time        `json:"createdAt,omitempty" db:"created_at"`
-	UpdatedAt       time.Time        `json:"updatedAt,omitempty" db:"updated_at"`
-	LifeCycleStatus string          `json:"lifeCycleStatus,omitempty" db:"lifecycle_status"`
-	Transport       []string        `json:"transport,omitempty" db:"transport"`
-	Channels        []Channel       `json:"channels,omitempty"`
-	Configuration   RestAPIConfig    `json:"configuration" db:"-"`
+	ID              string        `json:"id" db:"uuid"`
+	Handle          string        `json:"handle" db:"handle"`
+	Name            string        `json:"name" db:"name"`
+	Kind            string        `json:"kind" db:"kind"`
+	Description     string        `json:"description,omitempty" db:"description"`
+	Version         string        `json:"version" db:"version"`
+	CreatedBy       string        `json:"createdBy,omitempty" db:"created_by"`
+	ProjectID       string        `json:"projectId" db:"project_uuid"`           // FK to Project.ID
+	OrganizationID  string        `json:"organizationId" db:"organization_uuid"` // FK to Organization.ID
+	CreatedAt       time.Time     `json:"createdAt,omitempty" db:"created_at"`
+	UpdatedAt       time.Time     `json:"updatedAt,omitempty" db:"updated_at"`
+	LifeCycleStatus string        `json:"lifeCycleStatus,omitempty" db:"lifecycle_status"`
+	Transport       []string      `json:"transport,omitempty" db:"transport"`
+	Channels        []Channel     `json:"channels,omitempty"`
+	Configuration   RestAPIConfig `json:"configuration" db:"-"`
 }
 
 type RestAPIConfig struct {
-	Name              string         `json:"name,omitempty"`
-	Version           string         `json:"version,omitempty"`
-	Context           *string        `json:"context,omitempty"`
-	Upstream          UpstreamConfig `json:"upstream,omitempty"`
-	Policies          []Policy       `json:"policies,omitempty"`
-	Operations        []Operation    `json:"operations,omitempty"`
-	SubscriptionPlans []string       `json:"subscriptionPlans,omitempty"`
+	Name                string               `json:"name,omitempty"`
+	Version             string               `json:"version,omitempty"`
+	Context             *string              `json:"context,omitempty"`
+	Upstream            UpstreamConfig       `json:"upstream,omitempty"`
+	UpstreamDefinitions []UpstreamDefinition `json:"upstreamDefinitions,omitempty"`
+	Policies            []Policy             `json:"policies,omitempty"`
+	Operations          []Operation          `json:"operations,omitempty"`
+	SubscriptionPlans   []string             `json:"subscriptionPlans,omitempty"`
 }
 
 // TableName returns the table name for the API model
@@ -81,9 +82,10 @@ type Channel struct {
 
 // OperationRequest represents operation request details
 type OperationRequest struct {
-	Method   string   `json:"method,omitempty"`
-	Path     string   `json:"path,omitempty"`
-	Policies []Policy `json:"policies,omitempty"`
+	Method   string             `json:"method,omitempty"`
+	Path     string             `json:"path,omitempty"`
+	Policies []Policy           `json:"policies,omitempty"`
+	Upstream *OperationUpstream `json:"upstream,omitempty"`
 }
 
 // ChannelRequest represents channel request details
