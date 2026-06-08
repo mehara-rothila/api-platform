@@ -866,6 +866,13 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 		}
 	}
 	if hasSandbox {
+		// Guard: sandbox and main vhosts must differ, otherwise sandbox routes share
+		// the route key with main routes and collide. This mirrors the same check in
+		// the RuntimeDeployConfig transform path so both paths reject this
+		// configuration consistently.
+		if effectiveMainVHost == effectiveSandboxVHost {
+			return nil, nil, fmt.Errorf("sandbox upstream is configured but resolves to the same vhost %q as the main upstream; configure distinct vhosts to avoid route conflicts", effectiveMainVHost)
+		}
 		var sbClusterName string
 		var parsedSbURL *url.URL
 		var sbTimeout *resolvedTimeout
