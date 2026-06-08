@@ -339,7 +339,7 @@ Feature: Per-Operation Upstream Basic Routing
     When I delete the API "per-op-basic-both-api-v1.0"
     Then the response should be successful
 
-  Scenario: Per-operation upstream definition URL update routes to new backend (EDS-stable design)
+  Scenario: Per-operation upstream definition basePath update routes to new path (URL-stable cluster naming)
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """

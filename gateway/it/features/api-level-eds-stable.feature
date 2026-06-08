@@ -17,7 +17,7 @@
 # --------------------------------------------------------------------
 
 @api-level-eds-stable
-Feature: API-Level Upstream EDS-Stable Cluster Naming
+Feature: API-Level Upstream URL-Stable Cluster Naming
   As an API developer
   I want API-level main and sandbox upstream URL edits to propagate as
   endpoint updates rather than cluster recreates
@@ -26,7 +26,7 @@ Feature: API-Level Upstream EDS-Stable Cluster Naming
   Background:
     Given the gateway services are running
 
-  Scenario: API-level main upstream URL update routes to new backend (EDS-stable design)
+  Scenario: API-level main upstream URL update routes to new backend (URL-stable cluster naming)
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """

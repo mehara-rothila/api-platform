@@ -109,6 +109,34 @@ Feature: Per-Operation Upstream Validation
     And the JSON response field "status" should be "error"
     And the response body should contain "Upstream ref is required"
 
+  Scenario: Empty per-op sandbox leaf with no API-level sandbox is rejected
+    Given I authenticate using basic auth as "admin"
+    When I deploy this API configuration:
+      """
+      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      kind: RestApi
+      metadata:
+        name: per-op-val-empty-sandbox-api-v1.0
+      spec:
+        displayName: Per-Op-Val-Empty-Sandbox-API
+        version: v1.0
+        context: /per-op-val-empty-sandbox/$version
+        vhosts:
+          main: per-op-val-empty-sandbox-main.local
+        upstream:
+          main:
+            url: http://sample-backend:9080
+        operations:
+          - method: GET
+            path: /users
+            upstream:
+              sandbox: {}
+      """
+    Then the response should be a client error
+    And the response should be valid JSON
+    And the JSON response field "status" should be "error"
+    And the response body should contain "Upstream ref is required"
+
   Scenario: Per-op ref with invalid characters is rejected
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
