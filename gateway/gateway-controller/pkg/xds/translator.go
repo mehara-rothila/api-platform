@@ -836,7 +836,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 			}
 			// Reuse the referenced upstreamDefinition's cluster (built unconditionally
 			// below) instead of minting a per-op cluster. routeURLPath carries the
-			// definition's base path (#2065) so the route's static rewrite prepends it
+			// definition's base path so the route's static rewrite prepends it
 			// exactly once. Keep cluster_header ON with that cluster as the default so a
 			// dynamic-endpoint policy can still steer this operation. Precedence:
 			// op-policy > api-policy > per-op ref > api-level upstream.
@@ -917,7 +917,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 					return nil, nil, fmt.Errorf("per-op sandbox upstream for %s %s: %w", string(op.Method), op.Path, err)
 				}
 				// Reuse the referenced upstreamDefinition's cluster; routeURLPath carries
-				// its base path (#2065). Keep cluster_header ON so a sandbox dynamic-endpoint
+				// its base path. Keep cluster_header ON so a sandbox dynamic-endpoint
 				// policy can override the per-op default — consistent with the API-level
 				// sandbox routing fixed in #2059 (no static-pin bypass).
 				sbRouteCluster = defClusterName
@@ -990,7 +990,7 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 // resolveUpstreamCluster validates an upstream (main or sandbox) and creates its cluster.
 // Returns clusterName, parsedURL, timeout (can be nil), and error.
 // The cluster name is derived from sha256(apiID|upstreamName), giving the
-// API-level main/sandbox cluster an EDS-stable identity: URL edits update
+// API-level main/sandbox cluster a URL-stable identity: URL edits update
 // endpoints in-place rather than destroying and recreating the cluster.
 func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.Upstream, upstreamDefinitions *[]api.UpstreamDefinition) (string, *url.URL, *resolvedTimeout, error) {
 	var rawURL string
@@ -1052,18 +1052,18 @@ func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.
 		parsedURL.Path = *refBasePath
 	}
 
-	// Generate cluster name from EDS-stable hash (URL intentionally excluded).
+	// Generate cluster name from URL-stable hash (URL intentionally excluded).
 	clusterName := upstreamName + "_" + clusterkey.APILevel(apiID, upstreamName)
 
 	return clusterName, parsedURL, timeout, nil
 }
 
 // resolvePerOpDefinitionCluster resolves a ref-only per-op upstream target to the
-// EXISTING upstreamDefinition cluster: its EDS cluster name
+// EXISTING upstreamDefinition cluster: its stable cluster name
 // (upstream_<kind>_<apiID>_<defName>) and base path. The definition's cluster is
 // created unconditionally for every definition, so a per-op route reuses it rather
 // than minting its own — one cluster per definition serves both vhosts (no env in
-// the key). The base path comes from the definition's basePath field (#2065); the
+// the key). The base path comes from the definition's basePath field; the
 // caller passes it as the route's upstream path so the static rewrite prepends it.
 func (t *Translator) resolvePerOpDefinitionCluster(kind, apiID string, target *api.RestAPIOperationUpstreamTarget, upstreamDefinitions *[]api.UpstreamDefinition) (string, string, *resolvedTimeout, error) {
 	refName := strings.TrimSpace(target.Ref)

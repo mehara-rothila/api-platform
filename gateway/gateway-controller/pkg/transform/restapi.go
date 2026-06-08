@@ -389,7 +389,7 @@ type upstreamClusterResult struct {
 	// ClusterKey is the internal key used in rdc.UpstreamClusters.
 	ClusterKey string
 	// EnvoyClusterName is the Envoy cluster name. For API-level upstreams it is
-	// the EDS-stable hashed name "<env>_<16-hex>" (matching ClusterKey). For
+	// the URL-stable hashed name "<env>_<16-hex>" (matching ClusterKey). For
 	// per-op upstreams it is empty because the route resolves the cluster via
 	// ClusterKey directly. This is the value Envoy knows the cluster by, so the
 	// policy engine must use it for the x-target-upstream header.
@@ -429,7 +429,7 @@ func (t *RestAPITransformer) addUpstreamCluster(
 		basePath = "/"
 	}
 
-	// EDS-stable cluster naming: derived from sha256(apiID|env) so URL edits
+	// URL-stable cluster naming: derived from sha256(apiID|env) so URL edits
 	// propagate as endpoint updates rather than cluster recreates. ClusterKey and
 	// EnvoyClusterName are intentionally the same string so the policy engine's
 	// `default_upstream_cluster` metadata points at the actual Envoy cluster.
@@ -465,7 +465,7 @@ func (t *RestAPITransformer) addUpstreamCluster(
 // unconditionally (see the upstreamDefinition cluster loop in Transform), so a per-op
 // route reuses it rather than minting its own cluster. One cluster per definition
 // serves both the main and sandbox vhosts — the key carries no env component. Reuse
-// also means the route inherits the definition's authoritative basePath (#2065),
+// also means the route inherits the definition's authoritative basePath,
 // avoiding the URL-derived-basePath divergence a separate per-op cluster would have.
 func perOpDefinitionClusterKey(kind, uuid string, target *api.RestAPIOperationUpstreamTarget, upstreamDefinitions *[]api.UpstreamDefinition) (string, error) {
 	def, err := upstreamref.FindByName(target.Ref, upstreamDefinitions)
@@ -489,7 +489,7 @@ func resolveUpstreamURL(name string, up *api.Upstream, defs *[]api.UpstreamDefin
 		refName := strings.TrimSpace(*up.Ref)
 		// Resolve through the shared upstreamref helper (one source of truth for ref
 		// lookup, shared with the per-op transformer and the xDS translator), and return
-		// the definition's base path (from basePath, #2065) so the caller rewrites the
+		// the definition's base path (from basePath) so the caller rewrites the
 		// upstream path correctly. The "no URLs" check stays here since FindByName
 		// resolves the definition, not its endpoints.
 		def, err := upstreamref.FindByName(refName, defs)
