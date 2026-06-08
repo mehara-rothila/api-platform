@@ -6556,7 +6556,7 @@ components:
               weight:
                 type: integer
                 description: Weight for load balancing (optional, default 100)
-                minimum: 1
+                minimum: 0
                 maximum: 100
                 example: 80
 

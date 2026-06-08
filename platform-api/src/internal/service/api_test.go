@@ -676,6 +676,17 @@ func TestValidateUpstreamRefs(t *testing.T) {
 			t.Errorf("expected nil for valid timeout.connect, got %v", err)
 		}
 	})
+	t.Run("non-canonical timeout.connect unit rejected", func(t *testing.T) {
+		// time.ParseDuration accepts these, but the gateway only allows ms, s, m, h, so the
+		// control plane must reject them too or the API saves and then fails to deploy.
+		for _, v := range []string{"1h30m", "500ns", "500us"} {
+			d := ru("t")
+			d.Timeout = &api.UpstreamTimeout{Connect: &v}
+			if err := s.validateUpstreamRefs(&[]api.ReusableUpstream{d}, api.Upstream{}, nil); err == nil {
+				t.Errorf("expected error for non-canonical timeout.connect unit %q", v)
+			}
+		}
+	})
 	t.Run("no refs and no defs is valid", func(t *testing.T) {
 		if err := s.validateUpstreamRefs(nil, api.Upstream{}, nil); err != nil {
 			t.Errorf("expected nil, got %v", err)

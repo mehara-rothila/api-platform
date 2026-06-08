@@ -673,6 +673,12 @@ func (s *APIService) validateSubscriptionPlans(planNames *[]string, orgUUID stri
 // referenceable and deployable at the gateway.
 var upstreamRefNameRe = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
 
+// connectTimeoutRe is the contract an upstreamDefinition connect timeout must match: a whole or
+// decimal value in ms, s, m, or h. It mirrors the connect pattern published in the OpenAPI spec
+// and the gateway validator, since time.ParseDuration alone also accepts ns/us units and compound
+// values like "1h30m" that the gateway rejects at deploy.
+var connectTimeoutRe = regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m|h)$`)
+
 // validHTTPMethods is the set of operation methods the gateway accepts.
 var validHTTPMethods = map[string]bool{
 	"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true, "HEAD": true, "OPTIONS": true,
@@ -744,6 +750,9 @@ func (s *APIService) validateUpstreamRefs(upstreamDefs *[]api.ReusableUpstream, 
 				}
 				if dur <= 0 {
 					return fmt.Errorf("upstreamDefinitions %q timeout.connect %q must be positive", d.Name, *d.Timeout.Connect)
+				}
+				if !connectTimeoutRe.MatchString(*d.Timeout.Connect) {
+					return fmt.Errorf("upstreamDefinitions %q timeout.connect %q must use unit ms, s, m, or h (e.g. 5s, 500ms)", d.Name, *d.Timeout.Connect)
 				}
 			}
 			defined[d.Name] = true
