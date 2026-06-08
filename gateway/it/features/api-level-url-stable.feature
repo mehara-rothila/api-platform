@@ -16,7 +16,7 @@
 # under the License.
 # --------------------------------------------------------------------
 
-@api-level-eds-stable
+@api-level-url-stable
 Feature: API-Level Upstream URL-Stable Cluster Naming
   As an API developer
   I want API-level main and sandbox upstream URL edits to propagate as

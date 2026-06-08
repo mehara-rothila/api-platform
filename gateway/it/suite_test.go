@@ -145,7 +145,7 @@ func getFeaturePaths() []string {
 		"features/per-op-upstream-basic.feature",
 		"features/per-op-upstream-ref.feature",
 		"features/per-op-upstream-validation.feature",
-		"features/api-level-eds-stable.feature",
+		"features/api-level-url-stable.feature",
 		// These tests require different gateway configurations and are not included in the default suite run.
 		// "features/vhost-routing-single.feature", // cd it && make test-vhosts-single
 		// "features/vhost-routing-multi.feature", // cd it && make test-vhosts-multi
