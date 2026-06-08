@@ -390,11 +390,9 @@ func main() {
 	llmTransformer := transform.NewLLMTransformer(configStore, db, &cfg.Router, cfg, policyDefinitions, policyVersionResolver)
 	transformerRegistry := transform.NewRegistry(restTransformer, llmTransformer)
 	policyManager.SetTransformers(transformerRegistry)
-	// The policy manager receives the transformer registry; the snapshot
-	// manager's xDS translator does not. The main xDS flow therefore uses
-	// translateAPIConfig directly, while RuntimeDeployConfig output is
-	// consumed only by the policy xDS flow. Both flows derive the same
-	// cluster names.
+	// In this controller wiring, only policy xDS receives the transformer
+	// registry. Main Envoy xDS still translates RestAPI configs directly, so
+	// both paths must keep cluster-name derivation in sync.
 
 	// Load runtime configs from existing API configurations on startup.
 	// We write directly to runtimeStore to avoid triggering N separate snapshot updates;
