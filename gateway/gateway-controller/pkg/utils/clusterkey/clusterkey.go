@@ -16,10 +16,8 @@
  * under the License.
  */
 
-// Package clusterkey produces deterministic, hex-encoded cluster-key fragments
-// used by the gateway-controller to name Envoy clusters. It is a leaf package
-// (stdlib imports only) so both pkg/utils and pkg/xds can depend on it without
-// forming an import cycle.
+// Package clusterkey produces deterministic Envoy cluster-key fragments for the
+// gateway-controller, shared by both xDS builders so they name clusters identically.
 package clusterkey
 
 import (
@@ -27,13 +25,16 @@ import (
 	"encoding/hex"
 )
 
-// APILevel returns a deterministic, hex-encoded cluster-key fragment for an
-// API-level upstream cluster (main or sandbox). The key is derived from
-// SHA-256 of apiID|env. Method and path are excluded because API-level
-// upstream applies to the whole API; the URL is excluded so URL edits update
-// endpoints in-place rather than destroying and recreating the cluster.
-func APILevel(apiID, env string) string {
-	hashInput := apiID + "|" + env
-	sum := sha256.Sum256([]byte(hashInput))
-	return hex.EncodeToString(sum[:8])
+// APILevel returns the 24-hex cluster-key fragment for an API-level upstream,
+// the first 12 bytes of SHA-256(apiID). The URL is excluded so the name is stable
+// across URL edits; main and sandbox share it, set apart by the caller's env prefix.
+func APILevel(apiID string) string {
+	sum := sha256.Sum256([]byte(apiID))
+	return hex.EncodeToString(sum[:12])
+}
+
+// APILevelName joins the env prefix ("main"/"sandbox") to the APILevel fragment
+// to form the full Envoy cluster name.
+func APILevelName(env, apiID string) string {
+	return env + "_" + APILevel(apiID)
 }

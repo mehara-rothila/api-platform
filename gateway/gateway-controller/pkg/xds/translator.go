@@ -995,10 +995,8 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 }
 
 // resolveUpstreamCluster validates an upstream (main or sandbox) and creates its cluster.
-// Returns clusterName, parsedURL, timeout (can be nil), and error.
-// The cluster name is derived from sha256(apiID|upstreamName), giving the
-// API-level main/sandbox cluster a URL-stable identity: URL edits update
-// endpoints in-place rather than destroying and recreating the cluster.
+// Returns clusterName, parsedURL, timeout (can be nil), and error. The cluster name is
+// "<env>_<sha256(apiID)[:12]>", URL-stable for the API's lifetime.
 func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.Upstream, upstreamDefinitions *[]api.UpstreamDefinition) (string, *url.URL, *resolvedTimeout, error) {
 	var rawURL string
 	var timeout *resolvedTimeout
@@ -1060,7 +1058,7 @@ func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.
 	}
 
 	// Generate cluster name from URL-stable hash (URL intentionally excluded).
-	clusterName := upstreamName + "_" + clusterkey.APILevel(apiID, upstreamName)
+	clusterName := clusterkey.APILevelName(upstreamName, apiID)
 
 	return clusterName, parsedURL, timeout, nil
 }

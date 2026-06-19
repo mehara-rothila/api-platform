@@ -168,8 +168,8 @@ func TestResolveUpstreamCluster_WithDirectURL(t *testing.T) {
 	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, "main_"+clusterkey.APILevel("test-api", "main"), clusterName,
-		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
+	assert.Equal(t, "main_"+clusterkey.APILevel("test-api"), clusterName,
+		"cluster name should be the URL-stable hash of the apiID, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Equal(t, "http", parsedURL.Scheme)
 	assert.Equal(t, "backend:8080", parsedURL.Host)
@@ -206,8 +206,8 @@ func TestResolveUpstreamCluster_WithRef_WithTimeout(t *testing.T) {
 	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	require.NoError(t, err)
-	assert.Equal(t, "main_"+clusterkey.APILevel("test-api", "main"), clusterName,
-		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
+	assert.Equal(t, "main_"+clusterkey.APILevel("test-api"), clusterName,
+		"cluster name should be the URL-stable hash of the apiID, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Equal(t, "http", parsedURL.Scheme)
 	assert.Equal(t, "backend-1:9000", parsedURL.Host)
@@ -240,8 +240,8 @@ func TestResolveUpstreamCluster_WithRef_NoTimeout(t *testing.T) {
 	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "main", upstream, definitions)
 
 	require.NoError(t, err)
-	assert.Equal(t, "main_"+clusterkey.APILevel("test-api", "main"), clusterName,
-		"cluster name should be the EDS-stable hash of apiID|env, independent of URL")
+	assert.Equal(t, "main_"+clusterkey.APILevel("test-api"), clusterName,
+		"cluster name should be the URL-stable hash of the apiID, independent of URL")
 	assert.NotNil(t, parsedURL)
 	assert.Nil(t, timeout, "No timeout in definition should result in nil timeout")
 }
@@ -2158,10 +2158,10 @@ func TestTranslator_CreateDynamicFwdListenerForWebSubHub(t *testing.T) {
 	})
 }
 
-// TestResolveUpstreamCluster_DedupSameAPIDifferentURLs asserts the EDS-stable
+// TestResolveUpstreamCluster_DedupSameAPIDifferentURLs asserts the URL-stable
 // contract at the API level. Two distinct URLs that share the same apiID and
-// env must resolve to the same cluster name so URL edits become EDS endpoint
-// updates instead of CDS cluster recreates.
+// env must resolve to the same cluster name, so a URL edit updates the same
+// named cluster instead of removing one cluster name and adding another.
 func TestResolveUpstreamCluster_DedupSameAPIDifferentURLs(t *testing.T) {
 	translator := &Translator{}
 	a := &api.Upstream{Url: strPtr("http://api-main:8080")}
@@ -2173,12 +2173,14 @@ func TestResolveUpstreamCluster_DedupSameAPIDifferentURLs(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, nameA, nameB,
-		"API-level cluster name must not depend on URL - same apiID|env must produce same cluster")
+		"API-level cluster name must not depend on URL - same API and env must produce the same cluster")
 }
 
 // TestResolveUpstreamCluster_MainSandboxNeverCollide proves env separation:
 // the same apiID with env=main vs env=sandbox must produce distinct cluster
-// names so both vhosts can coexist.
+// names so both vhosts can coexist. The names share the hash fragment (same
+// API, so an operator can pair them at a glance); the env prefix provides
+// the distinction.
 func TestResolveUpstreamCluster_MainSandboxNeverCollide(t *testing.T) {
 	translator := &Translator{}
 	up := &api.Upstream{Url: strPtr("http://api-main:8080")}
@@ -2189,7 +2191,28 @@ func TestResolveUpstreamCluster_MainSandboxNeverCollide(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEqual(t, mainName, sandboxName,
-		"main and sandbox cluster names must differ (env is part of the hash input)")
+		"main and sandbox cluster names must differ (the env prefix distinguishes them)")
+	assert.Equal(t, strings.TrimPrefix(mainName, "main_"), strings.TrimPrefix(sandboxName, "sandbox_"),
+		"main and sandbox must share the hash fragment so an API's cluster pair is correlatable")
+}
+
+// TestResolveUpstreamCluster_NameNotURLDerived locks the move off the old
+// URL-sanitized scheme: the cluster name must carry no URL information (no
+// "cluster_" prefix, no host), only the env-prefixed identity hash. A
+// regression to URL-derived naming would reintroduce connection draining on
+// URL edits.
+func TestResolveUpstreamCluster_NameNotURLDerived(t *testing.T) {
+	translator := &Translator{}
+	upstream := &api.Upstream{Url: strPtr("http://api.example.com:8080/v1")}
+
+	name, _, _, err := translator.resolveUpstreamCluster("test-api", "main", upstream, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "main_"+clusterkey.APILevel("test-api"), name)
+	assert.False(t, strings.HasPrefix(name, "cluster_"),
+		"cluster name must not use the old URL-derived scheme")
+	assert.NotContains(t, name, "api.example.com",
+		"cluster name must not contain the backend host")
 }
 
 // TestTranslateConfigs_PerOpSandboxClusterEmitted asserts that the legacy path

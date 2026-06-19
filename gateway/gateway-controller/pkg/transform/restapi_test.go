@@ -779,13 +779,13 @@ func TestRestAPITransformer_SandboxRouteClusterHeader(t *testing.T) {
 		require.True(t, exists, "sandbox route should exist")
 		assert.True(t, r.Upstream.UseClusterHeader)
 		assert.True(t, strings.HasPrefix(r.Upstream.DefaultCluster, "sandbox_"),
-			"sandbox route must default to the EDS-stable sandbox cluster (sandbox_<hash>), not main; got %q", r.Upstream.DefaultCluster)
+			"sandbox route must default to the URL-stable sandbox cluster (sandbox_<hash>), not main; got %q", r.Upstream.DefaultCluster)
 	})
 }
 
-// TestRestAPITransformer_APILevelClusterNameShape asserts the EDS-stable cluster
+// TestRestAPITransformer_APILevelClusterNameShape asserts the URL-stable cluster
 // naming contract for API-level main and sandbox upstreams:
-//   - cluster names are "<env>_<16-hex>" derived from sha256(apiID|env)
+//   - cluster names are "<env>_<24-hex>" derived from sha256(apiID), shared by main and sandbox
 //   - ClusterKey and EnvoyClusterName are the SAME string (so the policy engine's
 //     default_upstream_cluster metadata resolves to a real Envoy cluster)
 func TestRestAPITransformer_APILevelClusterNameShape(t *testing.T) {
@@ -797,18 +797,20 @@ func TestRestAPITransformer_APILevelClusterNameShape(t *testing.T) {
 	rdc, err := transformer.Transform(cfg)
 	require.NoError(t, err)
 
-	expectedMain := "main_" + clusterkey.APILevel(cfg.UUID, "main")
-	expectedSandbox := "sandbox_" + clusterkey.APILevel(cfg.UUID, "sandbox")
+	// Expected name is hard-coded (sha256("test-api")[:12]), not computed via
+	// clusterkey.APILevel, so a change to the hashing function is caught here.
+	expectedMain := "main_2a28373e2cacc6ea903d8c7e"
+	expectedSandbox := "sandbox_2a28373e2cacc6ea903d8c7e"
 
 	mainRoute := rdc.Routes["GET|/test/users|main.local"]
 	require.NotNil(t, mainRoute, "main route must exist")
 	assert.Equal(t, expectedMain, mainRoute.Upstream.ClusterKey,
-		"main cluster name should be <env>_<hash> derived from apiID|env")
+		"main cluster name should be <env>_<hash> derived from sha256(apiID)")
 
 	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
 	require.NotNil(t, sandboxRoute, "sandbox route must exist")
 	assert.Equal(t, expectedSandbox, sandboxRoute.Upstream.ClusterKey,
-		"sandbox cluster name should be <env>_<hash> derived from apiID|env")
+		"sandbox cluster name should be <env>_<hash> derived from sha256(apiID)")
 
 	_, mainExists := rdc.UpstreamClusters[expectedMain]
 	require.True(t, mainExists, "main cluster %q must be registered in UpstreamClusters", expectedMain)
@@ -859,18 +861,17 @@ func TestRestAPITransformer_APILevelDefaultClusterMatchesRealCluster(t *testing.
 			"(prevents 503 NoRoute when policy engine writes x-target-upstream)",
 		mainRoute.Upstream.DefaultCluster)
 	assert.Equal(t, mainRoute.Upstream.ClusterKey, mainRoute.Upstream.DefaultCluster,
-		"DefaultCluster and ClusterKey must be the same string after the unification fix")
+		"DefaultCluster and ClusterKey must be the same string")
 }
 
-// TestRestAPITransformer_APILevelEDSStableAcrossURLEdit asserts that editing the
+// TestRestAPITransformer_APILevelURLStableAcrossURLEdit asserts that editing the
 // API-level main upstream URL does NOT change the cluster name. This is the
-// EDS-stable contract: URL edits propagate as endpoint updates, not cluster
-// recreates.
-func TestRestAPITransformer_APILevelEDSStableAcrossURLEdit(t *testing.T) {
+// URL-stable contract: the route keeps pointing at the same named cluster and
+// name-keyed stats stay continuous across URL edits.
+func TestRestAPITransformer_APILevelURLStableAcrossURLEdit(t *testing.T) {
 	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
 
 	cfgA := makeRestAPIWithOps([]api.Operation{{Method: "GET", Path: "/users"}})
-	// Mutate just the main URL on a copy of the spec.
 	rdcA, err := transformer.Transform(cfgA)
 	require.NoError(t, err)
 
@@ -885,5 +886,59 @@ func TestRestAPITransformer_APILevelEDSStableAcrossURLEdit(t *testing.T) {
 	nameB := rdcB.Routes["GET|/test/users|main.local"].Upstream.ClusterKey
 	assert.Equal(t, nameA, nameB,
 		"API-level main cluster name must not depend on URL "+
-			"(EDS-stable contract: URL edits propagate via endpoint updates)")
+			"(URL-stable contract: the name must survive URL edits)")
 }
+
+// TestRestAPITransformer_APILevelMainOnlyHasNoSandboxCluster verifies that an
+// API with no sandbox upstream registers no sandbox_<hash> cluster and creates
+// no sandbox route. The optional env must not leave a route pointing at a
+// cluster absent from UpstreamClusters (which would surface as 503 NoRoute).
+func TestRestAPITransformer_APILevelMainOnlyHasNoSandboxCluster(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{Method: "GET", Path: "/users"},
+	})
+	spec := cfg.Configuration.(api.RestAPI)
+	spec.Spec.Upstream.Sandbox = nil // main-only API
+	cfg.Configuration = spec
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	// Expected name is hard-coded (sha256("test-api")[:12]), not computed via
+	// clusterkey.APILevel, so a change to the hashing function is caught here.
+	expectedMain := "main_2a28373e2cacc6ea903d8c7e"
+	expectedSandbox := "sandbox_2a28373e2cacc6ea903d8c7e"
+
+	_, mainExists := rdc.UpstreamClusters[expectedMain]
+	require.True(t, mainExists, "main cluster %q must still be registered", expectedMain)
+
+	_, sandboxExists := rdc.UpstreamClusters[expectedSandbox]
+	assert.False(t, sandboxExists,
+		"sandbox cluster %q must not be registered when no sandbox upstream is configured", expectedSandbox)
+
+	_, sandboxRouteExists := rdc.Routes["GET|/test/users|sandbox.local"]
+	assert.False(t, sandboxRouteExists,
+		"no sandbox route should exist for a main-only API")
+}
+
+// TestRestAPITransformer_ClusterNameUsesSharedHelper locks the cross-builder
+// naming contract: the transform path names the cluster exactly
+// clusterkey.APILevelName(env, cfg.UUID), the same helper and argument the xDS
+// translator uses (pinned on that side in pkg/xds tests), so the two builders
+// cannot drift to different names for the same API.
+func TestRestAPITransformer_ClusterNameUsesSharedHelper(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{Method: "GET", Path: "/users"},
+	})
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, clusterkey.APILevelName("main", cfg.UUID),
+		rdc.Routes["GET|/test/users|main.local"].Upstream.ClusterKey)
+	assert.Equal(t, clusterkey.APILevelName("sandbox", cfg.UUID),
+		rdc.Routes["GET|/test/users|sandbox.local"].Upstream.ClusterKey)
+}
+

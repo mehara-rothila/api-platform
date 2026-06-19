@@ -25,31 +25,57 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// hexShape16 matches exactly 16 lowercase hex characters - the cluster-key
+// hexShape24 matches exactly 24 lowercase hex characters - the cluster-key
 // fragment shape produced by APILevel.
-var hexShape16 = regexp.MustCompile("^[a-f0-9]{16}$")
+var hexShape24 = regexp.MustCompile("^[a-f0-9]{24}$")
 
-// TestAPILevel validates the contract for API-level cluster naming:
-//   - deterministic for identical inputs
-//   - distinct on any input field (apiID, env)
-//   - 16 hex chars from SHA-256[:8]
+// TestAPILevel validates the API-level cluster-key fragment: deterministic,
+// distinct per apiID, and pinned to SHA-256[:12] (24 hex chars).
 func TestAPILevel(t *testing.T) {
-	t.Run("deterministic for identical inputs", func(t *testing.T) {
-		a := APILevel("api-1", "main")
-		b := APILevel("api-1", "main")
-		assert.Equal(t, a, b, "same inputs must produce same hash")
-		assert.Regexp(t, hexShape16, a, "hash must be exactly 16 lowercase hex characters")
+	t.Run("deterministic for identical input", func(t *testing.T) {
+		a := APILevel("api-1")
+		b := APILevel("api-1")
+		assert.Equal(t, a, b, "same input must produce same hash")
+		assert.Regexp(t, hexShape24, a, "hash must be exactly 24 lowercase hex characters")
 	})
 
 	t.Run("different apiID produces different hash", func(t *testing.T) {
-		a := APILevel("api-1", "main")
-		b := APILevel("api-2", "main")
+		a := APILevel("api-1")
+		b := APILevel("api-2")
 		assert.NotEqual(t, a, b)
 	})
 
-	t.Run("different env produces different hash", func(t *testing.T) {
-		a := APILevel("api-1", "main")
-		b := APILevel("api-1", "sandbox")
-		assert.NotEqual(t, a, b)
+	// Known-answer vectors pin the algorithm to SHA-256[:12]. Without these, any
+	// deterministic 24-hex function would satisfy the shape checks above.
+	t.Run("known-answer vectors", func(t *testing.T) {
+		assert.Equal(t, "f9811b73ac5d1a8db842634f", APILevel("api-1"))
+		assert.Equal(t, "2a28373e2cacc6ea903d8c7e", APILevel("test-api"))
+		// A realistic UUIDv7-shaped apiID, the form used in production.
+		assert.Equal(t, "54a9b3e5ce2b6ccb97168e59", APILevel("0190b3e2-7b1c-7c2a-9b3d-1a2b3c4d5e6f"))
+	})
+
+	// Empty input is deterministic (the SHA-256 of the empty string), documenting
+	// that APILevel itself does not reject empty apiIDs; non-emptiness is enforced
+	// upstream at deploy time.
+	t.Run("empty input is deterministic", func(t *testing.T) {
+		assert.Equal(t, "e3b0c44298fc1c149afbf4c8", APILevel(""))
+	})
+}
+
+// TestAPILevelName validates the full cluster-name contract: the env prefix
+// joined to the APILevel fragment. Both xDS builders go through this helper, so
+// the two paths cannot drift.
+func TestAPILevelName(t *testing.T) {
+	t.Run("joins env prefix to fragment", func(t *testing.T) {
+		assert.Equal(t, "main_"+APILevel("api-1"), APILevelName("main", "api-1"))
+		assert.Equal(t, "sandbox_"+APILevel("api-1"), APILevelName("sandbox", "api-1"))
+	})
+
+	t.Run("main and sandbox share the fragment, differ by prefix", func(t *testing.T) {
+		main := APILevelName("main", "api-1")
+		sandbox := APILevelName("sandbox", "api-1")
+		assert.NotEqual(t, main, sandbox)
+		assert.Equal(t, "main_f9811b73ac5d1a8db842634f", main)
+		assert.Equal(t, "sandbox_f9811b73ac5d1a8db842634f", sandbox)
 	})
 }

@@ -389,7 +389,7 @@ type upstreamClusterResult struct {
 	// ClusterKey is the internal key used in rdc.UpstreamClusters.
 	ClusterKey string
 	// EnvoyClusterName is the Envoy cluster name. For API-level upstreams it is
-	// the URL-stable hashed name "<env>_<16-hex>" (matching ClusterKey). For
+	// the URL-stable hashed name "<env>_<24-hex>" (matching ClusterKey). For
 	// per-op upstreams it is empty because the route resolves the cluster via
 	// ClusterKey directly. This is the value Envoy knows the cluster by, so the
 	// policy engine must use it for the x-target-upstream header.
@@ -429,11 +429,12 @@ func (t *RestAPITransformer) addUpstreamCluster(
 		basePath = "/"
 	}
 
-	// URL-stable cluster naming: derived from sha256(apiID|env) so URL edits
-	// propagate as endpoint updates rather than cluster recreates. ClusterKey and
-	// EnvoyClusterName are intentionally the same string so the policy engine's
-	// `default_upstream_cluster` metadata points at the actual Envoy cluster.
-	clusterKey := upstreamName + "_" + clusterkey.APILevel(rdc.Metadata.UUID, upstreamName)
+	// URL-stable cluster naming: "<env>_<sha256(apiID) fragment>" so a URL edit
+	// updates the same named cluster instead of renaming it (routes and stats
+	// keys stay continuous). ClusterKey and EnvoyClusterName are intentionally
+	// the same string so the policy engine's `default_upstream_cluster` metadata
+	// points at the actual Envoy cluster.
+	clusterKey := clusterkey.APILevelName(upstreamName, rdc.Metadata.UUID)
 
 	// ConnectTimeout is intentionally not set on this RDC cluster: the data plane
 	// resolves API-level timeouts via the legacy xDS translator, and this RDC path
