@@ -4273,6 +4273,9 @@ components:
         ref:
           type: string
           description: Reference to a predefined upstreamDefinition
+          minLength: 1
+          maxLength: 100
+          pattern: '^[a-zA-Z0-9\-_]+$'
         hostRewrite:
           type: string
           enum:
@@ -4326,13 +4329,9 @@ components:
         - required: [sandbox]
       properties:
         main:
-          description: Production vhost override. Must reference a named upstreamDefinition.
-          allOf:
-            - $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
+          $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
         sandbox:
-          description: Sandbox vhost override. Must reference a named upstreamDefinition.
-          allOf:
-            - $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
+          $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"
 
     RestAPIOperationUpstreamTarget:
       type: object
