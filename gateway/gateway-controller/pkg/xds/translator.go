@@ -834,12 +834,9 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 			if err != nil {
 				return nil, nil, fmt.Errorf("per-op main upstream for %s %s: %w", string(op.Method), op.Path, err)
 			}
-			// Reuse the referenced upstreamDefinition's cluster (built unconditionally
-			// below) instead of minting a per-op cluster. routeURLPath carries the
-			// definition's base path so the route's static rewrite prepends it
-			// exactly once. Keep cluster_header ON with that cluster as the default so a
-			// dynamic-endpoint policy can still steer this operation. Precedence:
-			// op-policy > api-policy > per-op ref > api-level upstream.
+			// Reuse the referenced definition's cluster (routeURLPath carries its base
+			// path) and keep cluster_header ON with that cluster as the default so a
+			// dynamic-endpoint policy can still steer this operation.
 			routeClusterName = defClusterName
 			routeURLPath = defBasePath
 			routeTimeout = defTimeout
@@ -866,10 +863,8 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 		}
 	}
 	if hasSandbox {
-		// Guard: sandbox and main vhosts must differ, otherwise sandbox routes share
-		// the route key with main routes and collide. This mirrors the same check in
-		// the RuntimeDeployConfig transform path so both paths reject this
-		// configuration consistently.
+		// Sandbox and main vhosts must differ or sandbox routes collide with main on
+		// the same route key. Mirrors the same guard in the RuntimeDeployConfig path.
 		if effectiveMainVHost == effectiveSandboxVHost {
 			return nil, nil, fmt.Errorf("sandbox upstream is configured but resolves to the same vhost %q as the main upstream; configure distinct vhosts to avoid route conflicts", effectiveMainVHost)
 		}
@@ -899,9 +894,8 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 			sbRouteHostRewrite = apiData.Upstream.Main.HostRewrite
 		}
 
-		// Create sandbox routes. When upstreamDefinitions exist, enable dynamic cluster
-		// selection (mirrors main) so a dynamic-endpoint policy can steer sandbox traffic;
-		// a per-op sandbox ref reuses the referenced definition's cluster (handled below).
+		// Create sandbox routes. With upstreamDefinitions, enable dynamic cluster
+		// selection (mirrors main); a per-op sandbox ref reuses its definition cluster.
 		sbRoutesList := make([]*route.Route, 0)
 		sbUseClusterHeader := apiData.UpstreamDefinitions != nil && len(*apiData.UpstreamDefinitions) > 0
 		for _, op := range apiData.Operations {
@@ -923,10 +917,8 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 				if err != nil {
 					return nil, nil, fmt.Errorf("per-op sandbox upstream for %s %s: %w", string(op.Method), op.Path, err)
 				}
-				// Reuse the referenced upstreamDefinition's cluster; routeURLPath carries
-				// its base path. Keep cluster_header ON so a sandbox dynamic-endpoint
-				// policy can override the per-op default — consistent with the API-level
-				// sandbox routing fixed in #2059 (no static-pin bypass).
+				// Reuse the referenced definition's cluster (routeURLPath carries its base
+				// path) and keep cluster_header ON for sandbox dynamic-endpoint overrides.
 				sbRouteCluster = defClusterName
 				sbRouteURLPath = defBasePath
 				sbRouteTimeout = defTimeout
@@ -1063,13 +1055,9 @@ func (t *Translator) resolveUpstreamCluster(apiID, upstreamName string, up *api.
 	return clusterName, parsedURL, timeout, nil
 }
 
-// resolvePerOpDefinitionCluster resolves a ref-only per-op upstream target to the
-// EXISTING upstreamDefinition cluster: its stable cluster name
-// (upstream_<kind>_<apiID>_<defName>) and base path. The definition's cluster is
-// created unconditionally for every definition, so a per-op route reuses it rather
-// than minting its own — one cluster per definition serves both vhosts (no env in
-// the key). The base path comes from the definition's basePath field; the
-// caller passes it as the route's upstream path so the static rewrite prepends it.
+// resolvePerOpDefinitionCluster resolves a ref-only per-op target to the EXISTING
+// upstreamDefinition cluster (created for every definition) and its base path, so a
+// per-op route reuses that cluster instead of minting its own.
 func (t *Translator) resolvePerOpDefinitionCluster(kind, apiID string, target *api.RestAPIOperationUpstreamTarget, upstreamDefinitions *[]api.UpstreamDefinition) (string, string, *resolvedTimeout, error) {
 	refName := strings.TrimSpace(target.Ref)
 	if refName == "" {
