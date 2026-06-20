@@ -4207,6 +4207,14 @@ components:
           default: deployed
           example: deployed
 
+    UpstreamReference:
+      type: string
+      description: Name of a predefined upstreamDefinition.
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-zA-Z0-9\-_]+$'
+      example: my-upstream-1
+
     UpstreamDefinition:
       type: object
       required:
@@ -4215,12 +4223,7 @@ components:
       description: Reusable upstream configuration with optional timeout and load balancing settings
       properties:
         name:
-          type: string
-          description: Unique identifier for this upstream definition
-          minLength: 1
-          maxLength: 100
-          pattern: '^[a-zA-Z0-9\-_]+$'
-          example: my-upstream-1
+          $ref: "#/components/schemas/UpstreamReference"
         basePath:
           type: string
           description: Base path prefix for all endpoints in this upstream (e.g., /api/v2). All requests to this upstream will have this path prepended.
@@ -4271,11 +4274,7 @@ components:
           description: Direct backend URL to route traffic to
           example: http://prod-backend:5000/api/v2
         ref:
-          type: string
-          description: Reference to a predefined upstreamDefinition
-          minLength: 1
-          maxLength: 100
-          pattern: '^[a-zA-Z0-9\-_]+$'
+          $ref: "#/components/schemas/UpstreamReference"
         hostRewrite:
           type: string
           enum:
@@ -4341,12 +4340,7 @@ components:
       description: A ref-only upstream pointer for operation-level overrides. URLs are not permitted at the operation level; all backend URLs must be declared in spec.upstreamDefinitions and referenced by name.
       properties:
         ref:
-          type: string
-          description: Name of a predefined upstream declared in spec.upstreamDefinitions.
-          minLength: 1
-          maxLength: 100
-          pattern: '^[a-zA-Z0-9\-_]+$'
-          example: my-upstream-1
+          $ref: "#/components/schemas/UpstreamReference"
 
     Policy:
       type: object
