@@ -179,12 +179,7 @@ func DerivePolicyFromAPIConfig(cfg *models.StoredConfig, routerConfig *config.Ro
 			}
 
 			vhosts := []string{effectiveMainVHost}
-			apiSandboxHasContent := apiData.Upstream.Sandbox != nil &&
-				((apiData.Upstream.Sandbox.Url != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Url) != "") ||
-					(apiData.Upstream.Sandbox.Ref != nil && strings.TrimSpace(*apiData.Upstream.Sandbox.Ref) != ""))
-			perOpSandboxHasContent := op.Upstream != nil && op.Upstream.Sandbox != nil &&
-				strings.TrimSpace(op.Upstream.Sandbox.Ref) != ""
-			if apiSandboxHasContent || perOpSandboxHasContent {
+			if apiData.Upstream.Sandbox != nil {
 				vhosts = append(vhosts, effectiveSandboxVHost)
 			}
 
