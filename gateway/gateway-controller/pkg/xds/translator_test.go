@@ -2288,3 +2288,114 @@ func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 		"expected the referenced upstreamDefinition cluster (upstream_..._user-svc-sb-cluster) to be emitted for reuse")
 	require.NotEmpty(t, routeConfigs, "expected sandbox route configuration to exist")
 }
+
+// TestTranslateConfigs_PerOpMainReusesDefinitionCluster asserts that a per-op main
+// override reuses the referenced upstreamDefinition cluster on the legacy xDS path,
+// minting no per-op "op_" cluster.
+func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
+	translator := createTestTranslator()
+
+	apiData := api.APIConfigData{
+		DisplayName: "Test API",
+		Context:     "/test",
+		Version:     "v1.0",
+		Vhosts: &struct {
+			Main    string  `json:"main" yaml:"main"`
+			Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main: "localhost",
+		},
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main: api.Upstream{Url: strPtr("http://api-main:8080")},
+		},
+		UpstreamDefinitions: &[]api.UpstreamDefinition{
+			{Name: "premium-svc", Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{{Url: "http://premium-svc:8080"}}},
+		},
+		Operations: []api.Operation{
+			{
+				Method: "GET", Path: "/premium",
+				Upstream: &api.RestAPIOperationUpstream{
+					Main: &api.RestAPIOperationUpstreamTarget{Ref: "premium-svc"},
+				},
+			},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID: "main-op-api",
+		Kind: string(api.RestAPIKindRestApi),
+		Configuration: api.RestAPI{
+			Kind:     api.RestAPIKindRestApi,
+			Metadata: api.Metadata{Name: "main-op-api"},
+			Spec:     apiData,
+		},
+	}
+
+	resources, err := translator.TranslateConfigs([]*models.StoredConfig{cfg}, "test-correlation")
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+
+	clusters := resources[resource.ClusterType]
+	require.NotEmpty(t, clusters, "expected at least one cluster")
+
+	var defClusterName string
+	for _, c := range clusters {
+		name := c.(*cluster.Cluster).GetName()
+		require.False(t, strings.HasPrefix(name, "op_"),
+			"per-op refs must not mint op_ clusters; got %q", name)
+		if strings.HasPrefix(name, "upstream_") && strings.Contains(name, "premium-svc") {
+			defClusterName = name
+		}
+	}
+	require.NotEmpty(t, defClusterName,
+		"expected the referenced upstreamDefinition cluster (upstream_..._premium-svc) to be emitted for the per-op main route")
+}
+
+// TestTranslateAPIConfig_SameVhostRejected asserts the guard that rejects a config
+// whose main and sandbox upstreams resolve to the same vhost, which would otherwise
+// collide on the route key.
+func TestTranslateAPIConfig_SameVhostRejected(t *testing.T) {
+	translator := createTestTranslator()
+
+	sameVhost := "same.local"
+	apiData := api.APIConfigData{
+		DisplayName: "Test API",
+		Context:     "/test",
+		Version:     "v1.0",
+		Vhosts: &struct {
+			Main    string  `json:"main" yaml:"main"`
+			Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main:    sameVhost,
+			Sandbox: &sameVhost,
+		},
+		Upstream: struct {
+			Main    api.Upstream  `json:"main" yaml:"main"`
+			Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+		}{
+			Main:    api.Upstream{Url: strPtr("http://api-main:8080")},
+			Sandbox: &api.Upstream{Url: strPtr("http://api-sandbox:8080")},
+		},
+		Operations: []api.Operation{
+			{Method: "GET", Path: "/users"},
+		},
+	}
+	cfg := &models.StoredConfig{
+		UUID: "same-vhost-api",
+		Kind: string(api.RestAPIKindRestApi),
+		Configuration: api.RestAPI{
+			Kind:     api.RestAPIKindRestApi,
+			Metadata: api.Metadata{Name: "same-vhost-api"},
+			Spec:     apiData,
+		},
+	}
+
+	_, _, err := translator.translateAPIConfig(cfg, []*models.StoredConfig{cfg})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "same vhost")
+}

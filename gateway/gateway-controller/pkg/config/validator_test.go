@@ -897,6 +897,49 @@ func TestValidateUpstreamDefinitions_TimeoutUnitContract(t *testing.T) {
 	}
 }
 
+// TestValidateUpstreamDefinitions_NameRules covers the definition-name contract
+// (max 100 chars, pattern ^[a-zA-Z0-9\-_]+$) so a valid name stays referenceable
+// from a per-op upstream override.
+func TestValidateUpstreamDefinitions_NameRules(t *testing.T) {
+	validator := NewAPIValidator()
+
+	validUpstreams := []struct {
+		Url    string `json:"url" yaml:"url"`
+		Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+	}{
+		{Url: "http://backend:8080"},
+	}
+
+	tests := []struct {
+		name    string
+		defName string
+		wantMsg string // empty means the name is accepted
+	}{
+		{"over-length is rejected", strings.Repeat("a", 101), "must not exceed 100 characters"},
+		{"space is rejected", "bad name", "must match pattern"},
+		{"dot is rejected", "has.dot", "must match pattern"},
+		{"colon is rejected", "has:colon", "must match pattern"},
+		{"slash is rejected", "has/slash", "must match pattern"},
+		{"valid name is accepted", "valid-name_123", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			definitions := &[]api.UpstreamDefinition{
+				{Name: tt.defName, Upstreams: validUpstreams},
+			}
+			errors := validator.validateUpstreamDefinitions(definitions)
+			if tt.wantMsg == "" {
+				assert.Empty(t, errors)
+				return
+			}
+			require.Len(t, errors, 1)
+			assert.Equal(t, "spec.upstreamDefinitions[0].name", errors[0].Field)
+			assert.Contains(t, errors[0].Message, tt.wantMsg)
+		})
+	}
+}
+
 func TestValidateUpstreamRef_ValidRef(t *testing.T) {
 	validator := NewAPIValidator()
 
