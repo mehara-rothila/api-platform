@@ -79,3 +79,29 @@ func TestAPILevelName(t *testing.T) {
 		assert.Equal(t, "sandbox_f9811b73ac5d1a8db842634f", sandbox)
 	})
 }
+
+// TestDefinitionName validates the upstreamDefinition cluster-name contract: the
+// "upstream_" prefix, kind and apiID scoping, and dot/colon sanitization. Both xDS
+// builders go through this helper, so per-op definition cluster names cannot drift.
+func TestDefinitionName(t *testing.T) {
+	t.Run("format and scoping", func(t *testing.T) {
+		assert.Equal(t, "upstream_RestApi_api-1_my-upstream", DefinitionName("RestApi", "api-1", "my-upstream"))
+	})
+
+	t.Run("sanitizes dots and colons", func(t *testing.T) {
+		tests := []struct {
+			defName  string
+			expected string
+		}{
+			{"my.upstream", "upstream_RestApi_api-1_my_upstream"},
+			{"my:upstream", "upstream_RestApi_api-1_my_upstream"},
+			{"host.example.com:8080", "upstream_RestApi_api-1_host_example_com_8080"},
+			{"a.b.c:d", "upstream_RestApi_api-1_a_b_c_d"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.defName, func(t *testing.T) {
+				assert.Equal(t, tt.expected, DefinitionName("RestApi", "api-1", tt.defName))
+			})
+		}
+	})
+}

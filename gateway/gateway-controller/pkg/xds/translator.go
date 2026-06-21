@@ -201,8 +201,9 @@ func (t *Translator) translateRuntimeConfig(rdc *models.RuntimeDeployConfig) ([]
 		if uc.TLS != nil && uc.TLS.Enabled {
 			parsedURL.Scheme = "https"
 		}
-		// Use per-cluster connect timeout from the upstream definition if available.
-		c := t.createCluster(clusterName, parsedURL, nil, uc.ConnectTimeout)
+		var connectTimeout *time.Duration
+		// Use global default; per-cluster timeout comes from the route's Timeout field
+		c := t.createCluster(clusterName, parsedURL, nil, connectTimeout)
 		clusters = append(clusters, c)
 	}
 
@@ -940,13 +941,9 @@ func (t *Translator) translateAPIConfig(cfg *models.StoredConfig, allConfigs []*
 				return nil, nil, fmt.Errorf("upstream definition '%s' has no URLs configured", def.Name)
 			}
 
-			// Sanitize definition name for use in Envoy cluster name
-			// Envoy cluster names must not contain dots or colons
-			sanitizedDefName := sanitizeUpstreamDefinitionName(def.Name)
-
 			// Use the definition name as cluster name, scoped by kind and API ID to avoid conflicts
 			// Format: upstream_<kind>_<apiId>_<sanitizedDefName>
-			defClusterName := constants.UpstreamDefinitionClusterPrefix + cfg.Kind + "_" + cfg.UUID + "_" + sanitizedDefName
+			defClusterName := clusterkey.DefinitionName(cfg.Kind, cfg.UUID, def.Name)
 
 			// Parse the first URL from the definition
 			rawURL := def.Upstreams[0].Url
@@ -1084,7 +1081,7 @@ func (t *Translator) resolvePerOpDefinitionCluster(kind, apiID string, target *a
 	if definition.BasePath != nil && *definition.BasePath != "" {
 		basePath = *definition.BasePath
 	}
-	clusterName := constants.UpstreamDefinitionClusterPrefix + kind + "_" + apiID + "_" + sanitizeUpstreamDefinitionName(definition.Name)
+	clusterName := clusterkey.DefinitionName(kind, apiID, definition.Name)
 	return clusterName, basePath, timeout, nil
 }
 
@@ -2810,14 +2807,6 @@ func (t *Translator) pathToRegex(path string) string {
 
 	// Anchor the regex to match the entire path
 	return "^" + regex + "$"
-}
-
-// sanitizeUpstreamDefinitionName sanitizes an upstream definition name for use in Envoy cluster names.
-// Envoy cluster names cannot contain dots or colons.
-func sanitizeUpstreamDefinitionName(name string) string {
-	sanitized := strings.ReplaceAll(name, ".", "_")
-	sanitized = strings.ReplaceAll(sanitized, ":", "_")
-	return sanitized
 }
 
 // createAccessLogConfig creates access log configuration based on format (JSON or text) to stdout

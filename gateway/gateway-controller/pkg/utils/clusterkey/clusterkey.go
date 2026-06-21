@@ -23,6 +23,9 @@ package clusterkey
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
+
+	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/constants"
 )
 
 // APILevel returns the 24-hex cluster-key fragment for an API-level upstream,
@@ -37,4 +40,19 @@ func APILevel(apiID string) string {
 // to form the full Envoy cluster name.
 func APILevelName(env, apiID string) string {
 	return env + "_" + APILevel(apiID)
+}
+
+// DefinitionName returns the full Envoy cluster name for an upstreamDefinition,
+// formatted as "upstream_<kind>_<apiID>_<sanitized name>". Dots and colons in the
+// definition name are replaced so the result is a valid Envoy cluster name. Both
+// xDS builders use this so they name definition clusters identically.
+func DefinitionName(kind, apiID, defName string) string {
+	return constants.UpstreamDefinitionClusterPrefix + kind + "_" + apiID + "_" + sanitizeDefName(defName)
+}
+
+// sanitizeDefName replaces dots and colons, which are not allowed in Envoy cluster names.
+func sanitizeDefName(name string) string {
+	name = strings.ReplaceAll(name, ".", "_")
+	name = strings.ReplaceAll(name, ":", "_")
+	return name
 }

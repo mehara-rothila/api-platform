@@ -814,7 +814,7 @@ func TestValidateUpstreamDefinitions_NoTimeout(t *testing.T) {
 func TestValidateUpstreamDefinitions_NonPositiveTimeout(t *testing.T) {
 	validator := NewAPIValidator()
 
-	for _, badTimeout := range []string{"0s", "-5s"} {
+	for _, badTimeout := range []string{"0s", "0ms"} {
 		connect := badTimeout
 		definitions := &[]api.UpstreamDefinition{
 			{
@@ -870,9 +870,10 @@ func TestValidateUpstreamDefinitions_MalformedTimeout(t *testing.T) {
 func TestValidateUpstreamDefinitions_TimeoutUnitContract(t *testing.T) {
 	validator := NewAPIValidator()
 
-	// time.ParseDuration accepts units outside the ms|s|m|h contract (ns, us, compounds);
-	// these must be rejected as invalid format, not silently accepted.
-	for _, badTimeout := range []string{"5ns", "100us", "1h30m"} {
+	// time.ParseDuration accepts units outside the ms|s|m|h contract (ns, us, compounds)
+	// and leading signs the published schema does not; these must be rejected as invalid
+	// format, not silently accepted.
+	for _, badTimeout := range []string{"5ns", "100us", "1h30m", "+5s", "-5s"} {
 		connect := badTimeout
 		definitions := &[]api.UpstreamDefinition{
 			{

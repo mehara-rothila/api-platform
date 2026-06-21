@@ -263,7 +263,7 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			if len(def.Upstreams) == 0 || def.Upstreams[0].Url == "" {
 				continue
 			}
-			defClusterKey := "upstream_" + cfg.Kind + "_" + cfg.UUID + "_" + SanitizeUpstreamDefinitionName(def.Name)
+			defClusterKey := clusterkey.DefinitionName(cfg.Kind, cfg.UUID, def.Name)
 			parsedURL, err := url.Parse(def.Upstreams[0].Url)
 			if err != nil {
 				return nil, fmt.Errorf("invalid URL in upstream definition '%s': %w", def.Name, err)
@@ -275,7 +275,6 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			if def.BasePath != nil && *def.BasePath != "" {
 				basePath = *def.BasePath
 			}
-			// ConnectTimeout omitted here too (see addUpstreamCluster).
 			rdc.UpstreamClusters[defClusterKey] = &models.UpstreamCluster{
 				Name:     def.Name,
 				BasePath: basePath,
@@ -380,8 +379,7 @@ type upstreamClusterResult struct {
 	// ClusterKey is the internal key used in rdc.UpstreamClusters.
 	ClusterKey string
 	// EnvoyClusterName is the name Envoy knows the cluster by, used by the policy
-	// engine for the x-target-upstream header. Empty for per-op upstreams, which
-	// resolve the cluster via ClusterKey directly.
+	// engine for the x-target-upstream header. It is always set equal to ClusterKey.
 	EnvoyClusterName string
 	// BasePath is the URL path component of the upstream (e.g. "/anything/foo").
 	BasePath string
@@ -422,8 +420,6 @@ func (t *RestAPITransformer) addUpstreamCluster(
 	// renaming it. ClusterKey and EnvoyClusterName are intentionally identical.
 	clusterKey := clusterkey.APILevelName(upstreamName, rdc.Metadata.UUID)
 
-	// ConnectTimeout intentionally unset: this RDC path feeds only the policy xDS,
-	// which does not read it; the data plane resolves timeouts via the xDS translator.
 	rdc.UpstreamClusters[clusterKey] = &models.UpstreamCluster{
 		BasePath: basePath,
 		Endpoints: []models.Endpoint{{
@@ -453,7 +449,7 @@ func perOpDefinitionClusterKey(kind, uuid string, target *api.RestAPIOperationUp
 	if len(def.Upstreams) == 0 || def.Upstreams[0].Url == "" {
 		return "", fmt.Errorf("upstream definition '%s' has no URLs", strings.TrimSpace(target.Ref))
 	}
-	return "upstream_" + kind + "_" + uuid + "_" + SanitizeUpstreamDefinitionName(def.Name), nil
+	return clusterkey.DefinitionName(kind, uuid, def.Name), nil
 }
 
 // resolveUpstreamURL resolves the URL from an upstream (direct URL or ref). For a ref it
@@ -495,13 +491,6 @@ func ResolvePort(u *url.URL) int {
 		return 443
 	}
 	return 80
-}
-
-// SanitizeUpstreamDefinitionName replaces dots and colons for Envoy cluster name compatibility.
-func SanitizeUpstreamDefinitionName(name string) string {
-	name = strings.ReplaceAll(name, ".", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	return name
 }
 
 // convertAPIPolicyToSDK converts an api.Policy to policyenginev1.PolicyInstance.

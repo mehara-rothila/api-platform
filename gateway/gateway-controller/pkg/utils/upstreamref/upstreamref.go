@@ -43,7 +43,7 @@ func FindByName(ref string, defs *[]api.UpstreamDefinition) (*api.UpstreamDefini
 		return nil, fmt.Errorf("upstream definition '%s' referenced but no definitions provided", refName)
 	}
 	for i, def := range *defs {
-		if def.Name == refName {
+		if strings.TrimSpace(def.Name) == refName {
 			return &(*defs)[i], nil
 		}
 	}

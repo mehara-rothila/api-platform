@@ -183,7 +183,7 @@ Feature: Per-Operation Upstream Validation
         upstreamDefinitions:
           - name: slow-svc
             timeout:
-              connect: -5s
+              connect: 0s
             upstreams:
               - url: http://sample-backend:9080
         upstream:

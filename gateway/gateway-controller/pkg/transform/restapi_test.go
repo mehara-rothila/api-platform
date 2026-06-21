@@ -224,29 +224,6 @@ func TestRestAPITransformer_EmptyVersionUsesResolvedVersionInChain(t *testing.T)
 		"resolved major version should be stored in the chain, not the original empty string")
 }
 
-// TestSanitizeUpstreamDefinitionName verifies that dots and colons are replaced
-// for Envoy cluster name compatibility.
-func TestSanitizeUpstreamDefinitionName(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"my-upstream", "my-upstream"},
-		{"my.upstream", "my_upstream"},
-		{"my:upstream", "my_upstream"},
-		{"host.example.com:8080", "host_example_com_8080"},
-		{"", ""},
-		{"a.b.c:d", "a_b_c_d"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := SanitizeUpstreamDefinitionName(tt.input)
-			assert.Equal(t, tt.expected, got)
-		})
-	}
-}
-
 // TestResolveUpstreamURL verifies URL resolution from direct URL, ref, or missing config.
 func TestResolveUpstreamURL(t *testing.T) {
 	refName := "my-def"

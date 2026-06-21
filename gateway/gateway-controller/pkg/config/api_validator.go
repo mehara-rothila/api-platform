@@ -52,7 +52,7 @@ func NewAPIValidator() *APIValidator {
 		versionRegex:         regexp.MustCompile(`^v?\d+(\.\d+)?(\.\d+)?$`),
 		urlFriendlyNameRegex: regexp.MustCompile(`^[a-zA-Z0-9\-_\. ]+$`),
 		upstreamRefRegex:     regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`),
-		connectTimeoutRegex:  regexp.MustCompile(`^[+-]?\d+(\.\d+)?(ms|s|m|h)$`),
+		connectTimeoutRegex:  regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m|h)$`),
 	}
 }
 
@@ -389,7 +389,7 @@ func (v *APIValidator) validateUpstreamDefinitions(definitions *[]api.UpstreamDe
 				} else if !v.connectTimeoutRegex.MatchString(timeoutStr) {
 					errors = append(errors, ValidationError{
 						Field:   fmt.Sprintf("spec.upstreamDefinitions[%d].timeout.connect", i),
-						Message: fmt.Sprintf("Invalid timeout format: %q (expected units: ms, s, m, h)", timeoutStr),
+						Message: fmt.Sprintf("Invalid timeout format: %q (use a single-unit, unsigned duration like '30s', '1m', or '500ms'; signed values like '+5s' and multi-unit values like '1m30s' are not supported)", timeoutStr),
 					})
 				} else if d <= 0 {
 					errors = append(errors, ValidationError{
@@ -647,7 +647,7 @@ func (v *APIValidator) validateOperations(operations []api.Operation, upstreamDe
 }
 
 // validateOperationUpstream validates per-operation upstream main and sandbox
-// sub-fields. Operation-level upstreams are ref-only — direct URLs are not
+// sub-fields. Operation-level upstreams are ref-only; direct URLs are not
 // permitted. Each present sub-field must reference a named entry in
 // spec.upstreamDefinitions. Error field paths are built as
 // spec.operations[N].upstream.<subfield>.ref.
