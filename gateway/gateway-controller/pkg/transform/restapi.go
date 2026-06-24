@@ -215,12 +215,10 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 		}
 
 		vhosts := []string{effectiveMainVHost}
-		if hasSandbox {
-			// Add the sandbox vhost only when this op has sandbox config (API-level
-			// fallback or a per-op override); otherwise it would route to the main cluster.
-			if apiSandboxHasContent || (op.Upstream != nil && op.Upstream.Sandbox != nil) {
-				vhosts = append(vhosts, effectiveSandboxVHost)
-			}
+		// Add the sandbox vhost only when this op has sandbox config (API-level
+		// fallback or a per-op override); otherwise it would route to the main cluster.
+		if apiSandboxHasContent || (op.Upstream != nil && op.Upstream.Sandbox != nil) {
+			vhosts = append(vhosts, effectiveSandboxVHost)
 		}
 
 		for _, vhost := range vhosts {
@@ -289,7 +287,7 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 
 	// Add sandbox upstream and update sandbox routes if present.
 	// API-level sandbox is optional when per-op sandbox overrides exist.
-	if hasSandbox && apiSandboxHasContent {
+	if apiSandboxHasContent {
 		sbUpstream, err := t.addUpstreamCluster(rdc, "sandbox", apiData.Upstream.Sandbox, apiData.UpstreamDefinitions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve sandbox upstream: %w", err)
