@@ -129,6 +129,8 @@ Feature: Per-Operation Upstream Basic Routing
             upstream:
               main:
                 ref: op-main-svc
+          - method: GET
+            path: /orders
       """
     Then the response should be successful
     And I wait for the endpoint "http://localhost:8080/per-op-basic-om/v1.0/users" to be ready with host "per-op-basic-om-main.local"
@@ -139,6 +141,13 @@ Feature: Per-Operation Upstream Basic Routing
     Then the response should be successful
     And the response should be valid JSON
     And the JSON response field "path" should be "/op-main/users"
+
+    When I clear all headers
+    And I set request host to "per-op-basic-om-main.local"
+    And I send a GET request to "http://localhost:8080/per-op-basic-om/v1.0/orders"
+    Then the response should be successful
+    And the response should be valid JSON
+    And the JSON response field "path" should be "/api-main/orders"
 
     Given I authenticate using basic auth as "admin"
     When I delete the API "per-op-basic-om-api-v1.0"

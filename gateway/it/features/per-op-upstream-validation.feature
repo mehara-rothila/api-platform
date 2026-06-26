@@ -47,7 +47,7 @@ Feature: Per-Operation Upstream Validation
             path: /users
             upstream: {}
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "At least one of 'main' or 'sandbox' must be set"
@@ -76,7 +76,7 @@ Feature: Per-Operation Upstream Validation
               main:
                 ref: does-not-exist
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "Referenced upstream definition 'does-not-exist' not found"
@@ -104,7 +104,7 @@ Feature: Per-Operation Upstream Validation
             upstream:
               main: {}
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "Upstream ref is required"
@@ -132,7 +132,7 @@ Feature: Per-Operation Upstream Validation
             upstream:
               sandbox: {}
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "Upstream ref is required"
@@ -161,7 +161,7 @@ Feature: Per-Operation Upstream Validation
               main:
                 ref: "bad/ref!"
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "Upstream ref must match pattern"
@@ -196,7 +196,34 @@ Feature: Per-Operation Upstream Validation
               main:
                 ref: slow-svc
       """
-    Then the response should be a client error
+    Then the response status code should be 400
     And the response should be valid JSON
     And the JSON response field "status" should be "error"
     And the response body should contain "Connect timeout must be a positive duration"
+
+  Scenario: Sandbox vhost without a sandbox upstream is rejected
+    Given I authenticate using basic auth as "admin"
+    When I deploy this API configuration:
+      """
+      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      kind: RestApi
+      metadata:
+        name: per-op-val-sandbox-vhost-api-v1.0
+      spec:
+        displayName: Per-Op-Val-Sandbox-Vhost-API
+        version: v1.0
+        context: /per-op-val-sandbox-vhost/$version
+        vhosts:
+          main: per-op-val-sandbox-vhost-main.local
+          sandbox: per-op-val-sandbox-vhost-sandbox.local
+        upstream:
+          main:
+            url: http://sample-backend:9080
+        operations:
+          - method: GET
+            path: /users
+      """
+    Then the response status code should be 400
+    And the response should be valid JSON
+    And the JSON response field "status" should be "error"
+    And the response body should contain "Sandbox vhost requires a sandbox upstream"

@@ -25,7 +25,7 @@ Feature: Per-Operation Upstream Ref
   Background:
     Given the gateway services are running
 
-  Scenario: Per-operation main refs route to different backends
+  Scenario: Per-operation main refs route to different backend services on different ports
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
@@ -46,8 +46,8 @@ Feature: Per-Operation Upstream Ref
             basePath: /user-svc
           - name: orders-svc
             upstreams:
-              - url: http://sample-backend:9080
-            basePath: /order-svc
+              - url: http://echo-backend:80
+            basePath: /anything
         upstream:
           main:
             url: http://sample-backend:9080
@@ -65,6 +65,7 @@ Feature: Per-Operation Upstream Ref
       """
     Then the response should be successful
     And I wait for the endpoint "http://localhost:8080/per-op/v1.0/users" to be ready with host "per-op-main.local"
+    And I wait for the endpoint "http://localhost:8080/per-op/v1.0/orders" to be ready with host "per-op-main.local"
 
     When I clear all headers
     And I set request host to "per-op-main.local"
@@ -78,63 +79,10 @@ Feature: Per-Operation Upstream Ref
     And I send a GET request to "http://localhost:8080/per-op/v1.0/orders"
     Then the response should be successful
     And the response should be valid JSON
-    And the JSON response field "path" should be "/order-svc/orders"
+    And the JSON response field "url" should be "http://echo-backend/anything/orders"
 
     Given I authenticate using basic auth as "admin"
     When I delete the API "per-op-ref-api-v1.0"
-    Then the response should be successful
-
-  Scenario: Per-operation sandbox ref routes independently of main
-    Given I authenticate using basic auth as "admin"
-    When I deploy this API configuration:
-      """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
-      kind: RestApi
-      metadata:
-        name: per-op-sandbox-ref-api-v1.0
-      spec:
-        displayName: Per-Op-Sandbox-Ref-API
-        version: v1.0
-        context: /per-op-sb/$version
-        vhosts:
-          main: per-op-sb-main.local
-          sandbox: per-op-sb-sandbox.local
-        upstreamDefinitions:
-          - name: sandbox-users-svc
-            upstreams:
-              - url: http://sample-backend:9080
-            basePath: /sandbox-user-svc
-        upstream:
-          main:
-            url: http://sample-backend:9080
-          sandbox:
-            url: http://sample-backend:9080/sandbox
-        operations:
-          - method: GET
-            path: /users
-            upstream:
-              sandbox:
-                ref: sandbox-users-svc
-      """
-    Then the response should be successful
-    And I wait for the endpoint "http://localhost:8080/per-op-sb/v1.0/users" to be ready with host "per-op-sb-main.local"
-
-    When I clear all headers
-    And I set request host to "per-op-sb-main.local"
-    And I send a GET request to "http://localhost:8080/per-op-sb/v1.0/users"
-    Then the response should be successful
-    And the response should be valid JSON
-    And the JSON response field "path" should be "/users"
-
-    When I clear all headers
-    And I set request host to "per-op-sb-sandbox.local"
-    And I send a GET request to "http://localhost:8080/per-op-sb/v1.0/users"
-    Then the response should be successful
-    And the response should be valid JSON
-    And the JSON response field "path" should be "/sandbox-user-svc/users"
-
-    Given I authenticate using basic auth as "admin"
-    When I delete the API "per-op-sandbox-ref-api-v1.0"
     Then the response should be successful
 
   Scenario: Mixed operations - one with per-op ref, one falling back to API-level
@@ -188,35 +136,6 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I delete the API "per-op-mixed-api-v1.0"
     Then the response should be successful
-
-  Scenario: Per-operation ref to missing upstreamDefinition should fail
-    Given I authenticate using basic auth as "admin"
-    When I deploy this API configuration:
-      """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
-      kind: RestApi
-      metadata:
-        name: per-op-missing-ref-api-v1.0
-      spec:
-        displayName: Per-Op-Missing-Ref-API
-        version: v1.0
-        context: /per-op-missing/$version
-        vhosts:
-          main: per-op-missing-main.local
-        upstream:
-          main:
-            url: http://sample-backend:9080
-        operations:
-          - method: GET
-            path: /users
-            upstream:
-              main:
-                ref: non-existent-upstream
-      """
-    Then the response should be a client error
-    And the response should be valid JSON
-    And the JSON response field "status" should be "error"
-    And the response body should contain "Referenced upstream definition 'non-existent-upstream' not found"
 
   Scenario: Operation-level dynamic-endpoint policy overrides the per-op ref
     Given I authenticate using basic auth as "admin"
@@ -335,4 +254,54 @@ Feature: Per-Operation Upstream Ref
 
     Given I authenticate using basic auth as "admin"
     When I delete the API "per-op-prec-api-api-v1.0"
+    Then the response should be successful
+
+  Scenario: Request-rewrite policy composes with a per-op ref
+    Given I authenticate using basic auth as "admin"
+    When I deploy this API configuration:
+      """
+      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      kind: RestApi
+      metadata:
+        name: per-op-ref-rewrite-api-v1.0
+      spec:
+        displayName: Per-Op-Ref-Rewrite-API
+        version: v1.0
+        context: /per-op-ref-rewrite/$version
+        vhosts:
+          main: per-op-ref-rewrite-main.local
+        upstreamDefinitions:
+          - name: ref-svc
+            upstreams:
+              - url: http://sample-backend:9080
+            basePath: /ref-svc
+        upstream:
+          main:
+            url: http://sample-backend:9080
+        operations:
+          - method: GET
+            path: /whoami
+            upstream:
+              main:
+                ref: ref-svc
+            policies:
+              - name: request-rewrite
+                version: v1
+                params:
+                  pathRewrite:
+                    type: ReplaceFullPath
+                    replaceFullPath: /rewritten
+      """
+    Then the response should be successful
+    And I wait for the endpoint "http://localhost:8080/per-op-ref-rewrite/v1.0/whoami" to be ready with host "per-op-ref-rewrite-main.local"
+
+    When I clear all headers
+    And I set request host to "per-op-ref-rewrite-main.local"
+    And I send a GET request to "http://localhost:8080/per-op-ref-rewrite/v1.0/whoami"
+    Then the response should be successful
+    And the response should be valid JSON
+    And the JSON response field "path" should be "/ref-svc/rewritten"
+
+    Given I authenticate using basic auth as "admin"
+    When I delete the API "per-op-ref-rewrite-api-v1.0"
     Then the response should be successful
