@@ -16,11 +16,11 @@
  * under the License.
  */
 const { Sequelize, DataTypes } = require('sequelize');
-const sequelize = require('../db/sequelize')
+const sequelize = require('../db/sequelizeConfig')
 const APIContent = require('../models/apiContent')
-const APIImages = require('./apiImages')
+const APIImages = require('./apiImage')
 const { Organization } = require('./organization')
-const Labels = require('./labels');
+const Labels = require('./label');
 
 const APIMetadata = sequelize.define('DP_API_METADATA', {
   API_ID: {
@@ -29,21 +29,21 @@ const APIMetadata = sequelize.define('DP_API_METADATA', {
     primaryKey: true
   },
   REFERENCE_ID: {
-    type: DataTypes.UUID,
-    allowNull: true,
-    unique: true
+    type: DataTypes.STRING,
+    allowNull: true
   },
   API_NAME: {
     type: DataTypes.STRING,
     allowNull: false
   },
   STATUS: {
-    type: DataTypes.STRING,
+    type: DataTypes.ENUM,
+    values: ['CREATED', 'PUBLISHED'],
     allowNull: false
   },
   API_DESCRIPTION: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   API_VERSION: {
     type: DataTypes.STRING,
@@ -91,11 +91,7 @@ const APIMetadata = sequelize.define('DP_API_METADATA', {
   },
   PRODUCTION_URL: {
     type: DataTypes.STRING,
-    allowNull: false
-  },
-  PROVIDER: {
-    type: DataTypes.STRING,
-    allowNull: false
+    allowNull: true
   },
   METADATA_SEARCH: {
     type: DataTypes.JSON,
@@ -109,20 +105,25 @@ const APIMetadata = sequelize.define('DP_API_METADATA', {
     type: DataTypes.STRING,
     allowNull: true
   },
-  GATEWAY_TYPE: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
 }, {
   timestamps: false,
   tableName: 'DP_API_METADATA',
-  returning: true
-},
-{
+  returning: true,
   indexes: [
       {
+          name: 'UQ_API_METADATA_NAME_VERSION_ORG',
           unique: true,
           fields: ['API_NAME', 'API_VERSION', 'ORG_ID']
+      },
+      {
+          name: 'UQ_API_METADATA_ORG_REFERENCE_ID',
+          unique: true,
+          fields: ['ORG_ID', 'REFERENCE_ID']
+      },
+      {
+          name: 'UQ_API_METADATA_HANDLE_ORG',
+          unique: true,
+          fields: ['API_HANDLE', 'ORG_ID']
       }
   ]
 });
@@ -136,10 +137,11 @@ const APILabels = sequelize.define('DP_API_LABELS', {
   },
   ORG_ID: {
       type: DataTypes.UUID,
-      defaultValue: Sequelize.UUIDV4
+      allowNull: false
   },
   API_ID: {
       type: DataTypes.UUID,
+      allowNull: false,
       references: {
           model: APIMetadata,
           key: 'API_ID',
@@ -147,6 +149,7 @@ const APILabels = sequelize.define('DP_API_LABELS', {
   },
   LABEL_ID: {
       type: DataTypes.UUID,
+      allowNull: false,
       references: {
           model: Labels,
           key: 'LABEL_ID',
@@ -156,7 +159,13 @@ const APILabels = sequelize.define('DP_API_LABELS', {
   timestamps: false,
   tableName: 'DP_API_LABELS',
   returning: true,
-  unique: false
+  indexes: [
+      {
+          name: 'UQ_API_LABELS_LABEL_API_ORG',
+          unique: true,
+          fields: ['LABEL_ID', 'API_ID', 'ORG_ID']
+      }
+  ]
 });
 
 APILabels.belongsTo(Organization, {
@@ -164,14 +173,17 @@ APILabels.belongsTo(Organization, {
 });
 
 APILabels.belongsTo(APIMetadata, {
-  foreignKey: 'API_ID'
+  foreignKey: 'API_ID',
+  onDelete: 'CASCADE'
 });
 
 APIContent.belongsTo(APIMetadata, {
   foreignKey: 'API_ID',
+  onDelete: 'CASCADE'
 });
 APIImages.belongsTo(APIMetadata, {
   foreignKey: 'API_ID',
+  onDelete: 'CASCADE'
 });
 APIMetadata.belongsTo(Organization, {
   foreignKey: 'ORG_ID'

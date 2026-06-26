@@ -4,13 +4,13 @@
 
 <a id="opIdcreateSubscription"></a>
 
-`POST /organizations/{orgId}/subscriptions`
+`POST /o/{orgId}/devportal/v1/subscriptions`
 
 > Code samples
 
 ```shell
 
-curl -X POST http://localhost:3000/devportal/organizations/{orgId}/subscriptions \
+curl -X POST https://devportal.api-platform.io/o/{orgId}/devportal/v1/subscriptions \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -19,7 +19,7 @@ curl -X POST http://localhost:3000/devportal/organizations/{orgId}/subscriptions
 
 ```
 
-Creates a token-based subscription for an API. The Developer Portal API ID is resolved to the control-plane API reference before the subscription is created. The API must exist, have token-based subscriptions enabled, and contain a control-plane reference ID.
+Creates a subscription for an API. The API must exist in the Developer Portal and have subscription plans enabled. The subscription is owned by the authenticated user.
 
 > Payload
 
@@ -40,7 +40,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
-|body|body|[SubscriptionCreateRequest](schemas.md#schemasubscriptioncreaterequest)|true|Subscription creation payload. `apiId` is the Developer Portal API ID; the service resolves it to the control-plane API reference before forwarding the request.|
+|body|body|[SubscriptionCreateRequest](schemas.md#schemasubscriptioncreaterequest)|true|Subscription creation payload. `apiId` is the Developer Portal API ID.|
 |orgId|path|string|true|none|
 
 > Example responses
@@ -50,12 +50,12 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 {
   "subscriptionId": "sub-12345",
-  "apiId": "cp-api-12345",
-  "apiName": "Weather API",
-  "applicationId": "cp-app-98765",
+  "apiId": "api-7f4c2a6b",
+  "subscriptionToken": "a3f1e8b2...",
   "subscriptionPlanName": "Gold",
   "status": "ACTIVE",
-  "createdTime": "2026-05-07T08:30:00Z"
+  "createdBy": "alice@example.com",
+  "createdAt": "2026-05-07T08:30:00Z"
 }
 ```
 
@@ -64,18 +64,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -89,9 +95,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -99,9 +105,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -109,31 +115,44 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|201|[Created](https://tools.ietf.org/html/rfc7231#section-6.3.2)|Subscription DTO returned by the control plane.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
+|201|[Created](https://tools.ietf.org/html/rfc7231#section-6.3.2)|Subscription DTO.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad request. Input validation failures are returned as an array; other bad request errors are returned as a standard error object.|Inline|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Resource not found.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="create-a-subscription-responseschema">Response Schema</h3>
 
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
+
+### Response Headers
+
+|Status|Header|Type|Format|Description|
+|---|---|---|---|---|
+|201|Location|string|uri|URL of the created subscription.|
+
 ## List subscriptions
 
 <a id="opIdlistSubscriptions"></a>
 
-`GET /organizations/{orgId}/subscriptions`
+`GET /o/{orgId}/devportal/v1/subscriptions`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/subscriptions \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/subscriptions \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
 
 ```
 
-Lists subscriptions from the control plane. When `apiId` is provided, the Developer Portal API ID is validated locally and translated to the control-plane API reference.
+Lists subscriptions owned by the authenticated user. When `apiId` is provided, results are additionally filtered by the Developer Portal API ID.
 
 ### Authentication
 
@@ -146,7 +165,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
-|apiId|query|string|false|Optional Developer Portal API ID used to filter by the resolved control-plane API reference.|
+|apiId|query|string|false|Optional Developer Portal API ID used to filter results.|
+|limit|query|integer|false|Maximum number of records to return.|
+|offset|query|integer|false|Number of records to skip before returning results.|
 |orgId|path|string|true|none|
 
 > Example responses
@@ -155,17 +176,22 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "count": 1,
   "list": [
     {
       "subscriptionId": "sub-12345",
-      "apiId": "cp-api-12345",
-      "apiName": "Weather API",
-      "applicationId": "cp-app-98765",
+      "apiId": "api-7f4c2a6b",
+      "subscriptionToken": "a3f1...",
       "subscriptionPlanName": "Gold",
-      "status": "ACTIVE"
+      "status": "ACTIVE",
+      "createdBy": "alice@example.com",
+      "createdAt": "2019-08-24T14:15:22Z"
     }
-  ]
+  ],
+  "pagination": {
+    "total": 42,
+    "limit": 20,
+    "offset": 0
+  }
 }
 ```
 
@@ -174,18 +200,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -199,9 +231,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -209,9 +241,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -219,12 +251,29 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|List of subscription DTOs returned by the control plane.|Inline|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|List of subscription DTOs.|Inline|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad request. Input validation failures are returned as an array; other bad request errors are returned as a standard error object.|Inline|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Resource not found.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="list-subscriptions-responseschema">Response Schema</h3>
+
+Status Code **200**
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|» list|[[SubscriptionResponse](schemas.md#schemasubscriptionresponse)]|false|none|[Subscription payload.]|
+|»» subscriptionId|string|false|none|none|
+|»» apiId|string|false|none|Developer Portal API ID.|
+|»» subscriptionToken|string|false|none|Plaintext subscription token. Present on create and when the token has not been encrypted at rest.|
+|»» subscriptionPlanName|string|false|none|none|
+|»» status|string|false|none|none|
+|»» createdBy|string|false|none|Identity (sub claim) of the user who created the subscription.|
+|»» createdAt|string(date-time)|false|none|none|
+|» pagination|[Pagination](schemas.md#schemapagination)|false|none|Standard pagination metadata returned with collection responses.|
+|»» total|integer|true|none|Total number of records matching the query.|
+|»» limit|integer|true|none|Maximum number of records returned in this response.|
+|»» offset|integer|true|none|Number of records skipped before this page.|
 
 #### Enumerated Values
 
@@ -232,28 +281,32 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |---|---|
 |status|ACTIVE|
 |status|INACTIVE|
-|status|ON_HOLD|
-|status|REJECTED|
-|status|TIER_UPDATE_PENDING|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
 
 ## Get a subscription
 
 <a id="opIdgetSubscription"></a>
 
-`GET /organizations/{orgId}/subscriptions/{subscriptionId}`
+`GET /o/{orgId}/devportal/v1/subscriptions/{subId}`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/subscriptions/{subscriptionId} \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/subscriptions/{subId} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
 
 ```
 
-Retrieves a single subscription from the control plane by subscription ID.
+Retrieves a single subscription by subscription ID.
 
 ### Authentication
 
@@ -267,7 +320,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |orgId|path|string|true|none|
-|subscriptionId|path|string|true|none|
+|subId|path|string|true|none|
 
 > Example responses
 
@@ -276,12 +329,12 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 {
   "subscriptionId": "sub-12345",
-  "apiId": "cp-api-12345",
-  "apiName": "Weather API",
-  "applicationId": "cp-app-98765",
+  "apiId": "api-7f4c2a6b",
+  "subscriptionToken": "a3f1e8b2...",
   "subscriptionPlanName": "Gold",
   "status": "ACTIVE",
-  "createdTime": "2026-05-07T08:30:00Z"
+  "createdBy": "alice@example.com",
+  "createdAt": "2026-05-07T08:30:00Z"
 }
 ```
 
@@ -289,9 +342,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -299,9 +352,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -309,7 +362,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Subscription DTO returned by the control plane.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Subscription DTO.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Resource not found.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
@@ -317,13 +370,13 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 <a id="opIdupdateSubscription"></a>
 
-`PUT /organizations/{orgId}/subscriptions/{subscriptionId}`
+`PUT /o/{orgId}/devportal/v1/subscriptions/{subId}`
 
 > Code samples
 
 ```shell
 
-curl -X PUT http://localhost:3000/devportal/organizations/{orgId}/subscriptions/{subscriptionId} \
+curl -X PUT https://devportal.api-platform.io/o/{orgId}/devportal/v1/subscriptions/{subId} \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -332,7 +385,7 @@ curl -X PUT http://localhost:3000/devportal/organizations/{orgId}/subscriptions/
 
 ```
 
-Updates the subscription status in the control plane. The service accepts only `ACTIVE` or `INACTIVE`.
+Updates the subscription status. Accepts only `ACTIVE` or `INACTIVE`.
 
 > Payload
 
@@ -355,7 +408,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |---|---|---|---|---|
 |body|body|[SubscriptionUpdateRequest](schemas.md#schemasubscriptionupdaterequest)|true|Subscription status update payload.|
 |orgId|path|string|true|none|
-|subscriptionId|path|string|true|none|
+|subId|path|string|true|none|
 
 > Example responses
 
@@ -364,12 +417,12 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 {
   "subscriptionId": "sub-12345",
-  "apiId": "cp-api-12345",
-  "apiName": "Weather API",
-  "applicationId": "cp-app-98765",
+  "apiId": "api-7f4c2a6b",
+  "subscriptionToken": "a3f1e8b2...",
   "subscriptionPlanName": "Gold",
   "status": "ACTIVE",
-  "createdTime": "2026-05-07T08:30:00Z"
+  "createdBy": "alice@example.com",
+  "createdAt": "2026-05-07T08:30:00Z"
 }
 ```
 
@@ -378,18 +431,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -403,9 +462,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -413,9 +472,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -423,31 +482,38 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Subscription DTO returned by the control plane.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Subscription DTO.|[SubscriptionResponse](schemas.md#schemasubscriptionresponse)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad request. Input validation failures are returned as an array; other bad request errors are returned as a standard error object.|Inline|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Resource not found.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="update-a-subscription-responseschema">Response Schema</h3>
 
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
+
 ## Delete a subscription
 
 <a id="opIddeleteSubscription"></a>
 
-`DELETE /organizations/{orgId}/subscriptions/{subscriptionId}`
+`DELETE /o/{orgId}/devportal/v1/subscriptions/{subId}`
 
 > Code samples
 
 ```shell
 
-curl -X DELETE http://localhost:3000/devportal/organizations/{orgId}/subscriptions/{subscriptionId} \
+curl -X DELETE https://devportal.api-platform.io/o/{orgId}/devportal/v1/subscriptions/{subId} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
 
 ```
 
-Deletes the subscription in the control plane and returns a success message from the Developer Portal.
+Deletes the subscription and returns a success message.
 
 ### Authentication
 
@@ -461,7 +527,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |orgId|path|string|true|none|
-|subscriptionId|path|string|true|none|
+|subId|path|string|true|none|
 
 > Example responses
 
@@ -477,9 +543,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -487,9 +553,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 

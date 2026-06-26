@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+
 -- Projects table
 CREATE TABLE IF NOT EXISTS projects (
     uuid VARCHAR(40) PRIMARY KEY,
@@ -363,6 +364,21 @@ CREATE TABLE IF NOT EXISTS websub_apis (
 );
 CREATE INDEX IF NOT EXISTS idx_websub_apis_project ON websub_apis(project_uuid);
 
+-- WebSub API HMAC secrets table (for inbound webhook event verification)
+CREATE TABLE IF NOT EXISTS websub_api_hmac_secrets (
+    uuid VARCHAR(40) PRIMARY KEY,
+    artifact_uuid VARCHAR(40) NOT NULL,
+    name VARCHAR(63) NOT NULL,
+    display_name VARCHAR(255),
+    encrypted_secret TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (artifact_uuid) REFERENCES artifacts(uuid) ON DELETE CASCADE,
+    UNIQUE(artifact_uuid, name)
+);
+CREATE INDEX IF NOT EXISTS idx_websub_api_hmac_secrets_artifact ON websub_api_hmac_secrets(artifact_uuid);
+
 -- WEBBROKER APIs table
 CREATE TABLE IF NOT EXISTS webbroker_apis (
     uuid VARCHAR(40) PRIMARY KEY,
@@ -456,3 +472,25 @@ CREATE INDEX IF NOT EXISTS idx_application_api_keys_app_id ON application_api_ke
 CREATE INDEX IF NOT EXISTS idx_application_api_keys_key_id ON application_api_keys(api_key_id);
 CREATE INDEX IF NOT EXISTS idx_application_artifacts_app_id ON application_artifacts(application_uuid);
 CREATE INDEX IF NOT EXISTS idx_application_artifacts_artifact_id ON application_artifacts(artifact_uuid);
+
+-- EventHub tables for multi-replica HA sync
+CREATE TABLE IF NOT EXISTS gateway_states (
+    gateway_id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    gateway_id TEXT NOT NULL,
+    processed_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    originated_timestamp TIMESTAMP NOT NULL,
+    entity_type TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('CREATE', 'UPDATE', 'DELETE')),
+    entity_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    event_data TEXT NOT NULL,
+    PRIMARY KEY (gateway_id, event_id),
+    FOREIGN KEY (gateway_id) REFERENCES gateway_states(gateway_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_gateway_id_processed_timestamp ON events(gateway_id, processed_timestamp);

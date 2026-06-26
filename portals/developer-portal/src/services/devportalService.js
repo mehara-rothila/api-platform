@@ -17,11 +17,10 @@
  */
 /* eslint-disable no-undef */
 const adminService = require('../services/adminService');
-const adminDao = require('../dao/admin');
+const orgDao = require('../dao/organizationDao');
 const util = require('../utils/util');
 const logger = require('../config/logger');
 const constants = require('../utils/constants');
-const { validationResult } = require('express-validator');
 const { retrieveContentType } = require('../utils/util');
 
 const getOrganization = async (req, res) => {
@@ -34,7 +33,7 @@ const getOrganization = async (req, res) => {
 };
 
 const getOrganizationDetails = async (orgId) => {
-    const organization = await adminDao.getOrganization(orgId);
+    const organization = await orgDao.get(orgId);
     return {
         orgId: organization.ORG_ID,
         orgName: organization.ORG_NAME,
@@ -42,30 +41,15 @@ const getOrganizationDetails = async (orgId) => {
         businessOwnerContact: organization.BUSINESS_OWNER_CONTACT,
         businessOwnerEmail: organization.BUSINESS_OWNER_EMAIL,
         orgHandle: organization.ORG_HANDLE,
-        roleClaimName: organization.ROLE_CLAIM_NAME,
-        groupsClaimName: organization.GROUPS_CLAIM_NAME,
-        organizationClaimName: organization.ORGANIZATION_CLAIM_NAME,
         organizationIdentifier: organization.ORGANIZATION_IDENTIFIER,
-        adminRole: organization.ADMIN_ROLE,
-        superAdminRole: organization.SUPER_ADMIN_ROLE,
-        subscriberRole: organization.SUBSCRIBER_ROLE,
-        groupClaimName: organization.GROUP_CLAIM_NAME,
         orgConfiguration: organization.ORG_CONFIG,
     };
 }
 
 const getOrgContent = async (req, res) => {
     try {
-        const rules = util.validateRequestParameters();
-        for (let validation of rules) {
-            await validation.run(req);
-        }
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json(util.getErrors(errors));
-        }
         if (req.query.fileType && req.query.fileName) {
-            const asset = await adminService.getOrgContent(req.params.orgId, req.params.name, req.query.fileType, req.query.fileName, req.query.filePath);
+            const asset = await adminService.getOrgContent(req.params.orgId, req.params.viewName, req.query.fileType, req.query.fileName, req.query.filePath);
             if (asset) {
                 const contentType = asset ? retrieveContentType(asset.FILE_NAME, asset.FILE_TYPE) : "";
                 res.set(constants.MIME_TYPES.CONYEMT_TYPE, contentType);
@@ -74,7 +58,7 @@ const getOrgContent = async (req, res) => {
                 return res.status(404).send('Not Found');
             }
         } else if (req.params.fileType) {
-            const assets = await adminService.getOrgContent(req.params.orgId, req.params.name, req.params.fileType);
+            const assets = await adminService.getOrgContent(req.params.orgId, req.params.viewName, req.params.fileType);
             const results = [];
             for (const asset of assets) {
                 const resp = {
@@ -93,7 +77,7 @@ const getOrgContent = async (req, res) => {
             error: error.message,
             stack: error.stack,
             orgId: req.params.orgId,
-            viewName: req.params.name
+            viewName: req.params.viewName
         });
         res.status(404).send(error.message);
     }

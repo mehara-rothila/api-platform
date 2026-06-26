@@ -21,9 +21,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -41,6 +43,7 @@ import (
 	"platform-api/src/config"
 	"platform-api/src/internal/database"
 	"platform-api/src/internal/handler"
+	"platform-api/src/internal/model"
 	"platform-api/src/internal/repository"
 	"platform-api/src/internal/service"
 	"platform-api/src/internal/utils"
@@ -48,6 +51,9 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/wso2/api-platform/common/authenticators"
+	"github.com/wso2/api-platform/common/eventhub"
+	commonmodels "github.com/wso2/api-platform/common/models"
 )
 
 type Server struct {
@@ -58,6 +64,8 @@ type Server struct {
 	gatewayRepo    repository.GatewayRepository
 	wsManager      *websocket.Manager // WebSocket connection manager
 	timeoutService *service.DeploymentTimeoutService
+	dispatcher     *service.EventDispatcher
+	eventHub       eventhub.EventHub
 	logger         *slog.Logger
 }
 
@@ -100,6 +108,13 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	websubAPIRepo := repository.NewWebSubAPIRepo(db)
 	webbrokerAPIRepo := repository.NewWebBrokerAPIRepo(db)
 	apiKeyRepo := repository.NewAPIKeyRepo(db)
+
+	// Seed the file-based organization on startup if file-based auth mode is enabled.
+	if cfg.Auth.FileBased.Enabled {
+		if err := seedFileBasedOrg(cfg, orgRepo, slogger); err != nil {
+			return nil, fmt.Errorf("failed to seed file-based organization: %w", err)
+		}
+	}
 
 	// Seed default LLM provider templates into the DB (per organization)
 	cfg.LLMTemplateDefinitionsPath = strings.TrimSpace(cfg.LLMTemplateDefinitionsPath)
@@ -161,6 +176,20 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	}
 	wsManager := websocket.NewManager(wsConfig, gatewayRepo, slogger)
 
+	// Initialize EventHub for multi-replica HA event delivery.
+	// Events published here are polled by all platform-api instances; each instance
+	// delivers them to gateway WebSocket connections it holds locally.
+	eventHub := eventhub.New(db.DB, slogger, eventhub.Config{
+		PollInterval:    cfg.EventHub.PollInterval,
+		CleanupInterval: cfg.EventHub.CleanupInterval,
+		RetentionPeriod: cfg.EventHub.RetentionPeriod,
+	})
+	if err := eventHub.Initialize(); err != nil {
+		return nil, fmt.Errorf("failed to initialize event hub: %w", err)
+	}
+	dispatcher := service.NewEventDispatcher(eventHub, wsManager, slogger)
+	wsManager.SetConnectionHooks(dispatcher.OnGatewayConnected, dispatcher.OnGatewayDisconnected)
+
 	// Initialize utilities
 	apiUtil := &utils.APIUtil{}
 
@@ -184,7 +213,7 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 		slogger,
 	)
 	projectService := service.NewProjectService(projectRepo, orgRepo, apiRepo, mcpProxyRepo, websubAPIRepo, slogger)
-	gatewayEventsService := service.NewGatewayEventsService(wsManager, slogger)
+	gatewayEventsService := service.NewGatewayEventsService(eventHub, slogger)
 	appService := service.NewApplicationService(appRepo, projectRepo, orgRepo, apiRepo, gatewayEventsService, slogger)
 	apiService := service.NewAPIService(apiRepo, projectRepo, orgRepo, gatewayRepo, deploymentRepo, devPortalRepo, publicationRepo,
 		subscriptionPlanRepo, customPolicyRepo, gatewayEventsService, devPortalService, apiUtil, slogger)
@@ -201,6 +230,24 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	mcpProxyService := service.NewMCPProxyService(mcpProxyRepo, projectRepo, deploymentRepo, gatewayRepo, gatewayEventsService, slogger)
 	websubAPIService := service.NewWebSubAPIService(websubAPIRepo, projectRepo, gatewayRepo, devPortalService, gatewayEventsService, apiUtil, slogger)
 	webbrokerAPIService := service.NewWebBrokerAPIService(webbrokerAPIRepo, projectRepo, gatewayRepo, devPortalService, gatewayEventsService, apiUtil, slogger)
+
+	// Initialize the shared database encryption key used for all encrypted DB columns.
+	// DATABASE_SUBSCRIPTION_TOKEN_ENCRYPTION_KEY is accepted as a legacy alias.
+	// DeriveEncryptionKey requires 64-char hex or base64-to-32-bytes; when falling back to
+	// the raw JWT secret (arbitrary length), hash it to a valid 64-char hex key.
+	dbEncryptionKey := cfg.Database.EncryptionKey
+	if dbEncryptionKey == "" && cfg.Auth.JWT.SecretKey != "" {
+		h := sha256.Sum256([]byte(cfg.Auth.JWT.SecretKey))
+		dbEncryptionKey = hex.EncodeToString(h[:])
+	}
+	hmacSecretRepo := repository.NewWebSubAPIHmacSecretRepo(db)
+	hmacSecretService, hmacErr := service.NewWebSubAPIHmacSecretService(
+		hmacSecretRepo, websubAPIRepo, gatewayEventsService, gatewayRepo,
+		dbEncryptionKey, slogger,
+	)
+	if hmacErr != nil {
+		slogger.Warn("WebSub HMAC secret service disabled — no valid encryption key configured", "error", hmacErr)
+	}
 	llmProviderDeploymentService := service.NewLLMProviderDeploymentService(
 		llmProviderRepo,
 		llmTemplateRepo,
@@ -266,7 +313,8 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	subscriptionPlanHandler := handler.NewSubscriptionPlanHandler(subscriptionPlanService, slogger)
 	appHandler := handler.NewApplicationHandler(appService, slogger)
 	wsHandler := handler.NewWebSocketHandler(wsManager, gatewayService, deploymentService, cfg.WebSocket.RateLimitPerMin, slogger)
-	internalGatewayHandler := handler.NewGatewayInternalAPIHandler(gatewayService, internalGatewayService, slogger)
+	internalGatewayHandler := handler.NewGatewayInternalAPIHandler(gatewayService, internalGatewayService, hmacSecretService, slogger)
+	hmacSecretHandler := handler.NewWebSubAPIHmacSecretHandler(hmacSecretService, slogger)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, slogger)
 	gitHandler := handler.NewGitHandler(gitService, slogger)
 	deploymentHandler := handler.NewDeploymentHandler(deploymentService, slogger)
@@ -293,6 +341,7 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	timeoutService := service.NewDeploymentTimeoutService(deploymentRepo, timeoutConfig, slogger)
 
 	slogger.Info("Initialized all services and handlers successfully")
+	slogger.Info("Platform API configuration", slog.Bool("demoMode", demoMode()))
 
 	if strings.ToLower(cfg.LogLevel) == "debug" {
 		gin.SetMode(gin.DebugMode)
@@ -311,14 +360,55 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	corsConfig.AllowCredentials = true
 	router.Use(cors.New(corsConfig))
 
-	// Configure and apply JWT authentication middleware
-	authConfig := middleware.AuthConfig{
-		SecretKey:      cfg.JWT.SecretKey,
-		TokenIssuer:    cfg.JWT.Issuer,
-		SkipPaths:      cfg.JWT.SkipPaths,
-		SkipValidation: cfg.JWT.SkipValidation,
+	// Load the OpenAPI scope registry — source of truth for required scopes per route.
+	scopeRegistry, err := middleware.LoadScopeRegistry(cfg.OpenAPISpecPath)
+	if err != nil {
+		slogger.Error("Failed to load OpenAPI scope registry", "path", cfg.OpenAPISpecPath, "error", err)
+		return nil, fmt.Errorf("failed to load OpenAPI scope registry: %w", err)
 	}
-	router.Use(middleware.AuthMiddleware(authConfig))
+	slogger.Info("Loaded OpenAPI scope registry", "path", cfg.OpenAPISpecPath)
+
+	// Load and validate the role-to-scope map when roles.yaml is configured.
+	roleScopeMap, err := loadRoleScopeMap(cfg, scopeRegistry, slogger)
+	if err != nil {
+		return nil, err
+	}
+
+	if !cfg.EnableScopeValidation {
+		slogger.Warn("scope validation is disabled — all authenticated requests will be allowed regardless of scope")
+	}
+
+	// Register public routes before auth middleware so they bypass authentication.
+	handler.NewAuthLoginHandler(cfg).RegisterPublicRoutes(router)
+
+	// Build and apply the authenticator middleware.
+	if cfg.Auth.FileBased.Enabled {
+		slogger.Info("Auth mode: file-based (HMAC-signed JWT)")
+		if !demoMode() {
+			slogger.Warn("file-based authentication is enabled — this is not recommended for production; please configure an IDP of your choice")
+		}
+		router.Use(middleware.LocalJWTAuthMiddleware(middleware.AuthConfig{
+			SecretKey:      cfg.Auth.JWT.SecretKey,
+			TokenIssuer:    cfg.Auth.JWT.Issuer,
+			SkipPaths:      cfg.Auth.SkipPaths,
+			SkipValidation: false,
+		}))
+	} else {
+		authenticator, err := buildAuthenticator(cfg, slogger, roleScopeMap)
+		if err != nil {
+			return nil, err
+		}
+		for _, mw := range authenticator.Middleware() {
+			router.Use(mw)
+		}
+	}
+
+	// Apply the OpenAPI-driven scope enforcer after authentication so identity
+	// values are already in the context when scope checks run.
+	router.Use(middleware.ScopeEnforcer(scopeRegistry, middleware.ScopeEnforcerConfig{
+		ValidationMode: cfg.Auth.IDP.ValidationMode,
+		Enabled:        cfg.EnableScopeValidation,
+	}))
 
 	// Register routes
 	orgHandler.RegisterRoutes(router)
@@ -345,6 +435,7 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 	websubAPIHandler.RegisterRoutes(router)
 	websubAPIKeyHandler.RegisterRoutes(router)
 	websubAPIDeploymentHandler.RegisterRoutes(router)
+	hmacSecretHandler.RegisterRoutes(router)
 	webbrokerAPIHandler.RegisterRoutes(router)
 	webbrokerAPIKeyHandler.RegisterRoutes(router)
 	webbrokerAPIDeploymentHandler.RegisterRoutes(router)
@@ -365,8 +456,115 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger) (*Server, 
 		gatewayRepo:    gatewayRepo,
 		wsManager:      wsManager,
 		timeoutService: timeoutService,
+		dispatcher:     dispatcher,
+		eventHub:       eventHub,
 		logger:         slogger,
 	}, nil
+}
+
+// demoMode reports whether APIP_DEMO_MODE is enabled.
+// Defaults to true when the variable is unset.
+func demoMode() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("APIP_DEMO_MODE")))
+	if v == "" {
+		return true
+	}
+	return v == "true" || v == "1"
+}
+
+// buildAuthenticator constructs an Authenticator from the server configuration.
+// Only called when file-based auth is disabled.
+func buildAuthenticator(cfg *config.Server, slogger *slog.Logger, roleScopeMap map[string][]string) (middleware.Authenticator, error) {
+	if !cfg.Auth.IDP.Enabled {
+		if cfg.Auth.JWT.SkipValidation {
+			if !demoMode() {
+				slogger.Warn("WARNING: JWT signature validation is DISABLED (AUTH_JWT_SKIP_VALIDATION=true) but APIP_DEMO_MODE=false. " +
+					"Tokens are NOT verified — any bearer value will be accepted. " +
+					"Set APIP_DEMO_MODE=true to suppress this warning, or set AUTH_JWT_SKIP_VALIDATION=false for production.")
+			} else {
+				slogger.Warn("JWT mode: signature validation disabled (AUTH_JWT_SKIP_VALIDATION=true) [APIP_DEMO_MODE=true]")
+			}
+		} else {
+			slogger.Info("JWT mode: HMAC signature validation enabled")
+		}
+		return middleware.NewJWTAuthenticator(
+			middleware.LocalJWTAuthMiddleware(middleware.AuthConfig{
+				SecretKey:      cfg.Auth.JWT.SecretKey,
+				TokenIssuer:    cfg.Auth.JWT.Issuer,
+				SkipPaths:      cfg.Auth.SkipPaths,
+				SkipValidation: cfg.Auth.JWT.SkipValidation,
+			}),
+		), nil
+	}
+
+	// IDP mode — same config fields for all providers (Thunder, Keycloak, Asgardeo, etc.)
+	issuerURL := ""
+	if len(cfg.Auth.IDP.Issuer) > 0 {
+		issuerURL = cfg.Auth.IDP.Issuer[0]
+	}
+	idpCfg := commonmodels.IDPConfig{
+		Enabled:    true,
+		IssuerURL:  issuerURL,
+		JWKSUrl:    cfg.Auth.IDP.JWKSUrl,
+		ScopeClaim: cfg.Auth.IDP.ClaimMappings.ScopeClaimName,
+	}
+	// Enforce audience validation only when at least one audience is configured.
+	if len(cfg.Auth.IDP.Audience) > 0 {
+		idpCfg.Audience = &cfg.Auth.IDP.Audience
+	}
+	authCfg := commonmodels.AuthConfig{
+		JWTConfig: &idpCfg,
+		SkipPaths: cfg.Auth.SkipPaths,
+	}
+	authMiddleware, err := authenticators.AuthMiddleware(authCfg, slogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize IDP auth middleware: %w", err)
+	}
+	claimsMiddleware := middleware.PlatformClaimsMiddleware(middleware.PlatformClaimNames{
+		OrganizationClaim: cfg.Auth.IDP.ClaimMappings.OrganizationClaimName,
+		OrgNameClaim:      cfg.Auth.IDP.ClaimMappings.OrgNameClaimName,
+		OrgHandleClaim:    cfg.Auth.IDP.ClaimMappings.OrgHandleClaimName,
+		UserIDClaim:       cfg.Auth.IDP.ClaimMappings.UserIDClaimName,
+		UsernameClaim:     cfg.Auth.IDP.ClaimMappings.UsernameClaimName,
+		EmailClaim:        cfg.Auth.IDP.ClaimMappings.EmailClaimName,
+		ScopeClaim:        cfg.Auth.IDP.ClaimMappings.ScopeClaimName,
+		RolesClaimPath:    cfg.Auth.IDP.ClaimMappings.RolesClaimPath,
+		RoleScopeMap:      roleScopeMap,
+	})
+
+	idpLabel := cfg.Auth.IDP.Name
+	if idpLabel == "" {
+		idpLabel = "IDP"
+	}
+	slogger.Info("IDP authentication enabled",
+		slog.String("name", idpLabel),
+		slog.String("jwksUrl", cfg.Auth.IDP.JWKSUrl),
+		slog.Any("issuers", cfg.Auth.IDP.Issuer),
+	)
+	return middleware.NewJWTAuthenticator(
+		authMiddleware,
+		claimsMiddleware,
+	), nil
+}
+
+// loadRoleScopeMap loads the role-to-scope mapping for IDP role mode.
+// Returns nil when role mode is not active or no mapping file is configured,
+// which causes IDP role names to be used as-is as scope values (passthrough).
+func loadRoleScopeMap(cfg *config.Server, registry *middleware.ScopeRegistry, slogger *slog.Logger) (map[string][]string, error) {
+	if !cfg.Auth.IDP.Enabled || cfg.Auth.IDP.ValidationMode != "role" || cfg.Auth.IDP.RoleMappingsFile == "" {
+		return nil, nil
+	}
+
+	m, err := middleware.LoadRoleScopeMap(cfg.Auth.IDP.RoleMappingsFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load role mappings file: %w", err)
+	}
+	if err := middleware.ValidateRoleScopeMap(m, registry); err != nil {
+		return nil, fmt.Errorf("invalid roles.yaml: %w", err)
+	}
+	slogger.Info("Loaded role-to-scope mapping", "path", cfg.Auth.IDP.RoleMappingsFile, "roles", len(m))
+
+	return m, nil
 }
 
 // generateSelfSignedCert creates a self-signed certificate for development and saves it to disk
@@ -503,23 +701,80 @@ func (s *Server) Start(port string, certDir string) error {
 		errCh <- httpServer.ListenAndServeTLS("", "")
 	}()
 
+	fmt.Print("\n\n" +
+		"========================================================================\n" +
+		"\n" +
+		"\n" +
+		"                      Platform API Started\n" +
+		"\n" +
+		"\n" +
+		"========================================================================\n" +
+		"\n\n")
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(quit)
 
+	teardown := func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			s.logger.Error("HTTP server shutdown error", "error", err)
+		}
+		s.wsManager.Shutdown()
+		s.dispatcher.Shutdown()
+		if err := s.eventHub.Close(); err != nil {
+			s.logger.Error("EventHub close error", "error", err)
+		}
+	}
+
 	select {
 	case err := <-errCh:
+		cancel()
+		teardown()
 		return err
 	case sig := <-quit:
 		s.logger.Info("Received shutdown signal", "signal", sig)
 		cancel()
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutdownCancel()
-		return httpServer.Shutdown(shutdownCtx)
+		teardown()
+		return nil
 	}
 }
 
 // GetRouter returns the gin router for testing purposes
 func (s *Server) GetRouter() *gin.Engine {
 	return s.router
+}
+
+// seedFileBasedOrg ensures the file-based auth organization exists in the DB.
+// It fetches by the configured handle first; only creates the org when no
+// matching org is found. The org ID in cfg is updated to the persisted value
+// so the login handler issues tokens with the correct org ID.
+func seedFileBasedOrg(cfg *config.Server, orgRepo repository.OrganizationRepository, slogger *slog.Logger) error {
+	ba := &cfg.Auth.FileBased
+
+	existing, err := orgRepo.GetOrganizationByHandle(ba.Organization.Handle)
+	if err != nil {
+		return fmt.Errorf("failed to check file-based organization: %w", err)
+	}
+	if existing != nil {
+		ba.Organization.ID = existing.ID
+		slogger.Info("File-based organization already exists", "id", existing.ID, "handle", existing.Handle)
+		return nil
+	}
+
+	now := time.Now()
+	org := &model.Organization{
+		ID:        ba.Organization.ID,
+		Name:      ba.Organization.Name,
+		Handle:    ba.Organization.Handle,
+		Region:    ba.Organization.Region,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := orgRepo.CreateOrganization(org); err != nil {
+		return fmt.Errorf("failed to create file-based organization: %w", err)
+	}
+	slogger.Info("Seeded file-based organization", "id", org.ID, "handle", org.Handle)
+	return nil
 }

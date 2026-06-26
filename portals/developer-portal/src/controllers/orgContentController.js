@@ -22,18 +22,16 @@ const Handlebars = require('handlebars');
 const logger = require('../config/logger');
 const { logUserAction } = require('../middlewares/auditLogger');
 const { renderTemplate, renderTemplateFromAPI } = require('../utils/util');
-const { trackHomePageVisit } = require('../utils/telemetry');
+const { trackHomePageVisit } = require('../utils/telemetryUtil');
 const { config } = require('../config/configLoader');
 const constants = require('../utils/constants');
-const adminDao = require('../dao/admin');
+const orgDao = require('../dao/organizationDao');
 
-const filePrefix = config.pathToContent;
-const baseURLDev = config.baseUrl + constants.ROUTE.VIEWS_PATH;
 
 const loadOrganizationContent = async (req, res) => {
 
     let html = "";
-    if (config.mode === constants.DEV_MODE) {
+    if (config.designMode?.enabled) {
         html = await loadOrgContentFromFile(req, res);
     } else {
         html = await loadOrgContentFromAPI(req, res);
@@ -57,29 +55,27 @@ const loadDefaultLandingPage = async (req, res) => {
 }
 const loadOrgContentFromFile = async (req, res) => {
 
-    //TODO fetch from DB
-    const mockProfileDataPath = path.join(process.cwd(), filePrefix + '../mock', '/userProfiles.json');
-    const mockProfileData = JSON.parse(fs.readFileSync(mockProfileDataPath, constants.CHARSET_UTF8));
+    const layoutPath = config.designMode.pathToLayout;
     const templateContent = {
-        userProfiles: mockProfileData,
-        baseUrl: baseURLDev + req.params.viewName
+        userProfiles: [],
+        baseUrl: config.baseUrl + constants.ROUTE.VIEWS_PATH + req.params.viewName,
+        devMode: true,
     };
-    
-    // Track home page visit telemetry for dev mode
+
     trackHomePageVisit({
         idpId: req.isAuthenticated() ? (req[constants.USER_ID] || req.user.sub) : undefined
     }, req);
-    
-    return renderTemplate(filePrefix + 'pages/home/page.hbs', filePrefix + 'layout/main.hbs', templateContent, false)
+
+    return renderTemplate(layoutPath + 'pages/home/page.hbs', layoutPath + 'layout/main.hbs', templateContent, false)
 }
 
 const loadOrgContentFromAPI = async (req, res) => {
     let html;
     const orgName = req.params.orgName;
-    const orgDetails = await adminDao.getOrganization(orgName);
+    const orgDetails = await orgDao.get(orgName);
     const devportalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
     try {
-        const orgId = await adminDao.getOrgId(orgName);
+        const orgId = await orgDao.getId(orgName);
         let profile = null;
         if (req.user) {
             profile = {
@@ -93,7 +89,8 @@ const loadOrgContentFromAPI = async (req, res) => {
         templateContent = {
             devportalMode: devportalMode,
             baseUrl: '/' + orgName + constants.ROUTE.VIEWS_PATH + req.params.viewName,
-            profile: req.isAuthenticated() ? profile : null
+            profile: req.isAuthenticated() ? profile : null,
+            showOnboarding: !!(profile?.isAdmin),
         };
         html = await renderTemplateFromAPI(templateContent, orgId, orgName, 'pages/home', req.params.viewName);
         // Track home page visit telemetry

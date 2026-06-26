@@ -48,7 +48,7 @@ func NewAPIHandler(apiService *service.APIService, slogger *slog.Logger) *APIHan
 	}
 }
 
-// CreateAPI handles POST /api/v1/rest-apis and creates a new API
+// CreateAPI handles POST /api/v0.9/rest-apis and creates a new API
 func (h *APIHandler) CreateAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -168,7 +168,7 @@ func (h *APIHandler) CreateAPI(c *gin.Context) {
 	c.JSON(http.StatusCreated, apiResponse)
 }
 
-// GetAPI handles GET /api/v1/rest-apis/:apiId and retrieves an API by its handle
+// GetAPI handles GET /api/v0.9/rest-apis/:apiId and retrieves an API by its handle
 func (h *APIHandler) GetAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -201,7 +201,7 @@ func (h *APIHandler) GetAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, apiResponse)
 }
 
-// ListAPIs handles GET /api/v1/rest-apis and lists APIs for an organization filtered by project
+// ListAPIs handles GET /api/v0.9/rest-apis and lists APIs for an organization filtered by project
 func (h *APIHandler) ListAPIs(c *gin.Context) {
 	// Get organization from JWT token
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -319,7 +319,7 @@ func (h *APIHandler) UpdateAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, apiResponse)
 }
 
-// DeleteAPI handles DELETE /api/v1/rest-apis/:apiId and deletes an API by its handle
+// DeleteAPI handles DELETE /api/v0.9/rest-apis/:apiId and deletes an API by its handle
 func (h *APIHandler) DeleteAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -352,7 +352,7 @@ func (h *APIHandler) DeleteAPI(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-// AddGatewaysToAPI handles POST /api/v1/rest-apis/:apiId/gateways to associate gateways with an API
+// AddGatewaysToAPI handles POST /api/v0.9/rest-apis/:apiId/gateways to associate gateways with an API
 func (h *APIHandler) AddGatewaysToAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -409,7 +409,7 @@ func (h *APIHandler) AddGatewaysToAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, gatewaysResponse)
 }
 
-// GetAPIGateways handles GET /api/v1/rest-apis/:apiId/gateways to get gateways associated with an API including deployment details
+// GetAPIGateways handles GET /api/v0.9/rest-apis/:apiId/gateways to get gateways associated with an API including deployment details
 func (h *APIHandler) GetAPIGateways(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -442,10 +442,7 @@ func (h *APIHandler) GetAPIGateways(c *gin.Context) {
 	c.JSON(http.StatusOK, gatewaysResponse)
 }
 
-// PublishToDevPortal handles POST /api/v1/rest-apis/:apiId/devportals/publish
-//
-// This endpoint publishes an API to a specific DevPortal with its metadata and OpenAPI definition.
-// The API must exist in platform-api and the specified DevPortal must be active.
+// PublishToDevPortal handles POST /api/v0.9/rest-apis/:apiId/publications
 func (h *APIHandler) PublishToDevPortal(c *gin.Context) {
 	// Extract organization ID from context
 	orgID, exists := middleware.GetOrganizationFromContext(c)
@@ -490,12 +487,8 @@ func (h *APIHandler) PublishToDevPortal(c *gin.Context) {
 	})
 }
 
-// UnpublishFromDevPortal handles POST /api/v1/rest-apis/:apiId/devportals/unpublish
-//
-// This endpoint unpublishes an API from a specific DevPortal by deleting it.
-// The API must exist in platform-api and the specified DevPortal must exist.
+// UnpublishFromDevPortal handles DELETE /api/v0.9/rest-apis/:apiId/publications/:devportalId
 func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
-	// Extract organization ID from context
 	orgID, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, utils.NewErrorResponse(401, "Unauthorized",
@@ -503,7 +496,6 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 		return
 	}
 
-	// Extract and validate apiId path parameter
 	apiID := c.Param("apiId")
 	if apiID == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
@@ -511,26 +503,22 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 		return
 	}
 
-	// Parse request body
-	var req api.UnpublishFromDevPortalRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		status, errorResp := utils.GetErrorResponse(err)
-		c.JSON(status, errorResp)
+	devPortalID := c.Param("devportalId")
+	if devPortalID == "" {
+		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
+			"DevPortal ID is required"))
 		return
 	}
 
-	// Unpublish API from DevPortal through service layer
-	err := h.apiService.UnpublishAPIFromDevPortalByHandle(apiID, utils.OpenAPIUUIDToString(req.DevPortalUuid), orgID)
+	err := h.apiService.UnpublishAPIFromDevPortalByHandle(apiID, devPortalID, orgID)
 	if err != nil {
 		status, errorResp := utils.GetErrorResponse(err)
 		c.JSON(status, errorResp)
 		return
 	}
 
-	// Log successful unpublish
-	h.slogger.Info("API unpublished successfully from DevPortal", "apiID", apiID, "devPortalUUID", utils.OpenAPIUUIDToString(req.DevPortalUuid))
+	h.slogger.Info("API unpublished successfully from DevPortal", "apiID", apiID, "devPortalID", devPortalID)
 
-	// Return success response
 	c.JSON(http.StatusOK, api.CommonResponse{
 		Success:   true,
 		Message:   "API unpublished successfully from DevPortal",
@@ -538,7 +526,7 @@ func (h *APIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	})
 }
 
-// GetAPIPublications handles GET /api/v1/rest-apis/:apiId/publications
+// GetAPIPublications handles GET /api/v0.9/rest-apis/:apiId/publications
 //
 // This endpoint retrieves all DevPortals associated with an API including publication details.
 func (h *APIHandler) GetAPIPublications(c *gin.Context) {
@@ -579,7 +567,7 @@ func (h *APIHandler) GetAPIPublications(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ImportAPIProject handles POST /api/v1/import/api-project
+// ImportAPIProject handles POST /api/v0.9/api-projects/import
 func (h *APIHandler) ImportAPIProject(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -936,7 +924,7 @@ func (h *APIHandler) ImportOpenAPI(c *gin.Context) {
 	c.JSON(http.StatusCreated, apiResponse)
 }
 
-// ValidateAPI handles GET /api/v1/rest-apis/validate
+// ValidateAPI handles GET /api/v0.9/rest-apis?name=&version=
 func (h *APIHandler) ValidateAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -951,7 +939,6 @@ func (h *APIHandler) ValidateAPI(c *gin.Context) {
 		return
 	}
 
-	// Validate that either identifier OR both name and version are provided
 	identifier := ""
 	name := ""
 	version := ""
@@ -982,37 +969,32 @@ func (h *APIHandler) ValidateAPI(c *gin.Context) {
 		return
 	}
 
-	// Always return 200 OK with the validation result
 	c.JSON(http.StatusOK, response)
 }
 
 // RegisterRoutes registers all API routes
 func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
 	h.slogger.Debug("Registering REST API routes")
-	// API routes
-	apiGroup := r.Group("/api/v1/rest-apis")
+	apiGroup := r.Group(constants.APIBasePath + "/rest-apis")
 	{
 		apiGroup.POST("", h.CreateAPI)
 		apiGroup.GET("", h.ListAPIs)
 		apiGroup.GET("/:apiId", h.GetAPI)
 		apiGroup.PUT("/:apiId", h.UpdateAPI)
 		apiGroup.DELETE("/:apiId", h.DeleteAPI)
-		apiGroup.GET("/validate", h.ValidateAPI)
+		apiGroup.POST("/import-openapi", h.ImportOpenAPI)
+		apiGroup.POST("/validate-openapi", h.ValidateOpenAPI)
 		apiGroup.GET("/:apiId/gateways", h.GetAPIGateways)
 		apiGroup.POST("/:apiId/gateways", h.AddGatewaysToAPI)
-		apiGroup.POST("/:apiId/devportals/publish", h.PublishToDevPortal)
-		apiGroup.POST("/:apiId/devportals/unpublish", h.UnpublishFromDevPortal)
+		apiGroup.POST("/:apiId/publications", h.PublishToDevPortal)
+		apiGroup.DELETE("/:apiId/publications/:devportalId", h.UnpublishFromDevPortal)
 		apiGroup.GET("/:apiId/publications", h.GetAPIPublications)
+
 	}
-	importGroup := r.Group("/api/v1/import")
+	apiProjectsGroup := r.Group(constants.APIBasePath + "/api-projects")
 	{
-		importGroup.POST("/api-project", h.ImportAPIProject)
-		importGroup.POST("/openapi", h.ImportOpenAPI)
-	}
-	validateGroup := r.Group("/api/v1/validate")
-	{
-		validateGroup.POST("/api-project", h.ValidateAPIProject)
-		validateGroup.POST("/openapi", h.ValidateOpenAPI)
+		apiProjectsGroup.POST("/import", h.ImportAPIProject)
+		apiProjectsGroup.POST("/validate", h.ValidateAPIProject)
 	}
 }
 

@@ -4,13 +4,13 @@
 
 <a id="opIdaddView"></a>
 
-`POST /organizations/{orgId}/views`
+`POST /o/{orgId}/devportal/v1/views`
 
 > Code samples
 
 ```shell
 
-curl -X POST http://localhost:3000/devportal/organizations/{orgId}/views \
+curl -X POST https://devportal.api-platform.io/o/{orgId}/devportal/v1/views \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -63,18 +63,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -88,9 +94,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "409",
-  "message": "Conflict",
-  "description": "Organization already exists"
+  "status": "error",
+  "code": "CONFLICT",
+  "message": "Conflict"
 }
 ```
 
@@ -98,9 +104,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -110,22 +116,29 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |---|---|---|---|
 |201|[Created](https://tools.ietf.org/html/rfc7231#section-6.3.2)|JSON message response.|[MessageResponse](schemas.md#schemamessageresponse)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad request. Input validation failures are returned as an array; other bad request errors are returned as a standard error object.|Inline|
-|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|Duplicate organization data conflicts with an existing record.|[ErrorResponse](schemas.md#schemaerrorresponse)|
+|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|The request conflicts with an existing resource.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="create-a-view-responseschema">Response Schema</h3>
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
 
 ## List views
 
 <a id="opIdgetAllViews"></a>
 
-`GET /organizations/{orgId}/views`
+`GET /o/{orgId}/devportal/v1/views`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/views \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/views \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -145,6 +158,8 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
+|limit|query|integer|false|Maximum number of records to return.|
+|offset|query|integer|false|Number of records to skip before returning results.|
 |orgId|path|string|true|none|
 
 > Example responses
@@ -152,23 +167,23 @@ This operation requires <strong>Basic Auth</strong> authentication.
 > 200 Response
 
 ```json
-[
-  {
-    "name": "default",
-    "displayName": "Default",
-    "labels": [
-      "default"
-    ]
-  },
-  {
-    "name": "partner-apis",
-    "displayName": "Partner APIs",
-    "labels": [
-      "partner",
-      "public"
-    ]
+{
+  "list": [
+    {
+      "name": "partner-apis",
+      "displayName": "Partner APIs",
+      "labels": [
+        "partner",
+        "public"
+      ]
+    }
+  ],
+  "pagination": {
+    "total": 42,
+    "limit": 20,
+    "offset": 0
   }
-]
+}
 ```
 
 > 404 Response
@@ -181,9 +196,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -201,22 +216,26 @@ Status Code **200**
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|*anonymous*|[[ViewResponse](schemas.md#schemaviewresponse)]|false|none|none|
-|» name|string|true|none|none|
-|» displayName|string|true|none|none|
-|» labels|[string]|true|none|none|
+|» list|[[ViewResponse](schemas.md#schemaviewresponse)]|false|none|none|
+|»» name|string|true|none|none|
+|»» displayName|string|true|none|none|
+|»» labels|[string]|true|none|none|
+|» pagination|[Pagination](schemas.md#schemapagination)|false|none|Standard pagination metadata returned with collection responses.|
+|»» total|integer|true|none|Total number of records matching the query.|
+|»» limit|integer|true|none|Maximum number of records returned in this response.|
+|»» offset|integer|true|none|Number of records skipped before this page.|
 
 ## Update a view
 
 <a id="opIdupdateView"></a>
 
-`PUT /organizations/{orgId}/views/{name}`
+`PUT /o/{orgId}/devportal/v1/views/{viewName}`
 
 > Code samples
 
 ```shell
 
-curl -X PUT http://localhost:3000/devportal/organizations/{orgId}/views/{name} \
+curl -X PUT https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName} \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -254,7 +273,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |---|---|---|---|---|
 |body|body|[ViewUpdateRequest](schemas.md#schemaviewupdaterequest)|true|View update payload. Include only the display-name or label changes that should be applied.|
 |orgId|path|string|true|none|
-|name|path|string|true|none|
+|viewName|path|string|true|none|
 
 > Example responses
 
@@ -277,18 +296,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -302,9 +327,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -312,9 +337,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "409",
-  "message": "Conflict",
-  "description": "Organization already exists"
+  "status": "error",
+  "code": "CONFLICT",
+  "message": "Conflict"
 }
 ```
 
@@ -322,9 +347,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -335,22 +360,29 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|Echo of the accepted view update payload.|[ViewUpdateRequest](schemas.md#schemaviewupdaterequest)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad request. Input validation failures are returned as an array; other bad request errors are returned as a standard error object.|Inline|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Resource not found.|[ErrorResponse](schemas.md#schemaerrorresponse)|
-|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|Duplicate organization data conflicts with an existing record.|[ErrorResponse](schemas.md#schemaerrorresponse)|
+|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|The request conflicts with an existing resource.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="update-a-view-responseschema">Response Schema</h3>
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
 
 ## Get a view
 
 <a id="opIdgetView"></a>
 
-`GET /organizations/{orgId}/views/{name}`
+`GET /o/{orgId}/devportal/v1/views/{viewName}`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/views/{name} \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -371,7 +403,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |orgId|path|string|true|none|
-|name|path|string|true|none|
+|viewName|path|string|true|none|
 
 > Example responses
 
@@ -393,18 +425,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -424,9 +462,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -441,17 +479,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 <h3 id="get-a-view-responseschema">Response Schema</h3>
 
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|
+
 ## Delete a view
 
 <a id="opIddeleteView"></a>
 
-`DELETE /organizations/{orgId}/views/{name}`
+`DELETE /o/{orgId}/devportal/v1/views/{viewName}`
 
 > Code samples
 
 ```shell
 
-curl -X DELETE http://localhost:3000/devportal/organizations/{orgId}/views/{name} \
+curl -X DELETE https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -472,7 +517,7 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |orgId|path|string|true|none|
-|name|path|string|true|none|
+|viewName|path|string|true|none|
 
 > Example responses
 
@@ -481,18 +526,24 @@ This operation requires <strong>Basic Auth</strong> authentication.
 ```json
 [
   {
-    "code": "400",
-    "message": "input validation failed",
-    "description": "Invalid value"
+    "status": "error",
+    "code": "COMMON_VALIDATION_ERROR",
+    "message": "Input validation failed.",
+    "errors": [
+      {
+        "field": "orgName",
+        "message": "orgName is required."
+      }
+    ]
   }
 ]
 ```
 
 ```json
 {
-  "code": "400",
-  "message": "Bad Request",
-  "description": "Missing required parameter: 'orgId'"
+  "status": "error",
+  "code": "MISSING_REQUIRED_PARAMETER",
+  "message": "Missing required parameter."
 }
 ```
 
@@ -506,9 +557,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "404",
-  "message": "Resource Not Found",
-  "description": "Organization not found"
+  "status": "error",
+  "code": "ORG_NOT_FOUND",
+  "message": "Organization not found."
 }
 ```
 
@@ -516,9 +567,9 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ```json
 {
-  "code": "500",
-  "message": "Internal Server Error",
-  "description": "Internal Server Error"
+  "status": "error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An unexpected error occurred."
 }
 ```
 
@@ -532,3 +583,10 @@ This operation requires <strong>Basic Auth</strong> authentication.
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal server error.|[ErrorResponse](schemas.md#schemaerrorresponse)|
 
 <h3 id="delete-a-view-responseschema">Response Schema</h3>
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|status|error|
+|status|error|

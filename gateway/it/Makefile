@@ -16,7 +16,7 @@
 # under the License.
 # --------------------------------------------------------------------
 
-.PHONY: all test test-postgres test-vhosts-single test-vhosts-multi test-all test-verbose clean deps check-docker coverage-report build-coverage ensure-test-tags
+.PHONY: all test test-postgres test-sqlserver test-vhosts-single test-vhosts-multi test-all test-verbose clean deps check-docker coverage-report build-coverage ensure-test-tags
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null | tr -d '[:space:]' || echo "0.0.1-SNAPSHOT")
 DOCKER_REGISTRY ?= ghcr.io/wso2/api-platform
@@ -56,9 +56,17 @@ build-coverage:
 # Build and run tests in one command
 test-all: build-coverage test
 
-# Run integration tests against Postgres-backed controller
+# Run integration tests against Postgres-backed controller.
+# This compose runs two gateway-controllers: the management one (REST) and
+# gateway-controller-xds (feeds xDS to gateway-runtime). IT_GATEWAY_CONTROLLER_HA
+# tells the suite to probe the runtime controller (host port 9093) for the
+# policy-chain xDS-sync version, since that is the version the policy engine echoes.
 test-postgres:
-	COMPOSE_FILE=docker-compose.test.postgres.yaml $(MAKE) test
+	COMPOSE_FILE=docker-compose.test.postgres.yaml IT_GATEWAY_CONTROLLER_HA=true $(MAKE) test
+
+# Run integration tests against SQL Server-backed controller
+test-sqlserver:
+	COMPOSE_FILE=docker-compose.test.sqlserver.yaml $(MAKE) test
 
 # Run vhost integration tests with single-domain gateway vhost config
 test-vhosts-single:
@@ -77,6 +85,7 @@ clean:
 	docker rm -f $$(docker ps -aq --filter "name=it-") 2>/dev/null || true
 	docker compose -f docker-compose.test.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true
 	docker compose -f docker-compose.test.postgres.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true
+	docker compose -f docker-compose.test.sqlserver.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true
 	docker compose -f docker-compose.test.vhosts-single.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true
 	docker compose -f docker-compose.test.vhosts-multi.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true
 	docker compose -f docker-compose.test.postgres.vhosts-single.yaml -p gateway-it down -v --remove-orphans 2>/dev/null || true

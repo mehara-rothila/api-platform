@@ -29,7 +29,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-empty-api-v1.0
@@ -56,7 +56,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-missing-ref-api-v1.0
@@ -85,7 +85,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-empty-leaf-api-v1.0
@@ -113,7 +113,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-empty-sandbox-api-v1.0
@@ -141,7 +141,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-bad-ref-api-v1.0
@@ -170,7 +170,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-neg-timeout-api-v1.0
@@ -205,7 +205,7 @@ Feature: Per-Operation Upstream Validation
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-val-sandbox-vhost-api-v1.0

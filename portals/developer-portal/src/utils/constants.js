@@ -15,8 +15,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+// Devportal API base segment and version — single source of truth for the
+// org-scoped invocation prefix `/o/{orgId}/devportal/v1`. Change these two to
+// bump the base segment (e.g. devportalv2) or version (e.g. v2) everywhere.
+const DEVPORTAL_BASE_SEGMENT = 'devportal';
+const DEVPORTAL_VERSION = 'v1';
+// Express route prefix for org-scoped routes, e.g. '/o/:orgId/devportal/v1'
+const DEVPORTAL_ORG_PREFIX = `/o/:orgId/${DEVPORTAL_BASE_SEGMENT}/${DEVPORTAL_VERSION}`;
+// Builder for a concrete org path used in server-side URL generation,
+// e.g. devportalOrgPath('abc') => '/o/abc/devportal/v1'
+const devportalOrgPath = (orgId) => `/o/${orgId}/${DEVPORTAL_BASE_SEGMENT}/${DEVPORTAL_VERSION}`;
+
 module.exports = {
-    DEV_MODE: 'development',
+    DEVPORTAL_API: {
+        BASE_SEGMENT: DEVPORTAL_BASE_SEGMENT,
+        VERSION: DEVPORTAL_VERSION,
+        ORG_PREFIX: DEVPORTAL_ORG_PREFIX,
+        orgPath: devportalOrgPath,
+    },
     IMAGE: 'image',
     STYLE: 'style',
     TEXT: 'text',
@@ -32,7 +48,6 @@ module.exports = {
     ORG_HANDLE: 'orgHandle',
     ACCESS_TOKEN: 'accessToken',
     REFRESH_TOKEN: 'refreshToken',
-    EXCHANGE_TOKEN: 'exchangeToken',
     USER_ID: 'sub',
     BASIC_HEADER: 'basicAuthHeader',
     API_VISIBILITY: {
@@ -41,7 +56,7 @@ module.exports = {
     },
     API_STATUS: {
         PUBLISHED: "PUBLISHED",
-        UNPUBLISHED: "CREATED"
+        CREATED: "CREATED"
     },
     API_TYPE: {
         REST: "REST",
@@ -119,19 +134,12 @@ module.exports = {
         RESIDENT_KEY_MANAGER: 'Resident Key Manager',
         APP_DEV_STS_KEY_MANAGER: '_appdev_sts_key_manager_',
     },
-    KEY_MANAGER_TYPES: {
-        ASGARDEO: 'ASGARDEO',
-        WSO2IS: 'WSO2IS',
-        KEYCLOAK: 'KEYCLOAK',
-        GENERIC_OIDC: 'GENERIC_OIDC',
-    },
     TOKEN_TYPES: {
         API_KEY: 'API_KEY',
         OAUTH: 'OAUTH',
         BASIC: 'BASIC'
     },
     ROUTE: {
-        DEV_PORTAL: '/devportal',
         STYLES: '/styles',
         TECHNICAL_STYLES: '/technical-styles',
         TECHNICAL_SCRIPTS: '/technical-scripts',
@@ -143,7 +151,6 @@ module.exports = {
         API_FILE_PATH: '/apis/',
         API_LANDING_PAGE_PATH: '/api/',
         API_DOCS_PATH: '/docs/',
-        DEVPORTAL_ASSETS_BASE_PATH: '/devportal/organizations/',
         DEVPORTAL_CONFIGURE: ['/*/configure', '/*/views/*/configure'],
         DEVPORTAL_ROOT: ['/portal', '/portal/*/edit', '/devportal'],
         DEVPORTAL_API_LISTING: '/*/apis',
@@ -185,36 +192,45 @@ module.exports = {
         API_DEFINITION_XML: 'apiDefinition.xml',
         LLMS_CONFIG: 'llms-config.json',
     },
+    ARTIFACT_DIR: {
+        WEB: 'web',
+        DOCS: 'docs',
+    },
     DEFAULT_SUBSCRIPTION_PLANS: [
         {
-            "policyName": "Bronze",
+            "planName": "Bronze",
             "description": "Allows 1000 requests per minute",
             "requestCount": 1000,
             "displayName": "Bronze",
+            "type": "requestcount",
         },
         {
-            "policyName": "Gold",
+            "planName": "Gold",
             "description": "Allows 5000 requests per minute",
             "displayName": "Gold",
             "requestCount": 5000,
+            "type": "requestcount",
         },
         {
-            "policyName": "Silver",
+            "planName": "Silver",
             "description": "Allows 2000 requests per minute",
             "displayName": "Silver",
             "requestCount": 2000,
+            "type": "requestcount",
         },
         {
-            "policyName": "Unlimited",
+            "planName": "Unlimited",
             "description": "Allows unlimited requests",
             "displayName": "Unlimited",
-            "requestCount": "Unlimited",
+            "requestCount": -1,
+            "type": "requestcount",
         },
         {
-            "policyName": "AsyncUnlimited",
+            "planName": "AsyncUnlimited",
             "description": "Allows unlimited requests for Async APIs",
             "displayName": "AsyncUnlimited",
-            "requestCount": "Unlimited",
+            "requestCount": -1,
+            "type": "requestcount",
         }
     ],
     ERROR_MESSAGE: {
@@ -243,10 +259,6 @@ module.exports = {
         API_NOT_IN_ORG: "API does not belong to given organization",
         UNAUTHENTICATED: "Unauthorized access, please log in again",
         FORBIDDEN: "You do not have permission to access this resource",
-        PROVIDER_CREATE_ERROR: "Error while creating provider",
-        PROVIDER_UPDATE_ERROR: "Error while updating provider",
-        PROVIDER_DELETE_ERROR: "Error while deleting provider",
-        PROVIDER_FETCH_ERROR: "Error while fetching providers",
         LABEL_DELETE_ERROR: "Error while deleting label",
         LABEL_RETRIEVE_ERROR: "Error while deleting label",
         LABEL_CREATE_ERROR: "Error while creating labels",
@@ -255,8 +267,8 @@ module.exports = {
         VIEW_UPDATE_ERROR: "Error while updating view",
         VIEW_DELETE_ERROR: "Error while deleting view",
         VIEW_RETRIEVE_ERROR: "Error while fetching view",
-        SUBSCRIPTION_POLICY_CREATE_ERROR: "Error while creating subscription policy",
-        SUBSCRIPTION_POLICY_NOT_FOUND: "Subscription policy not found",
+        SUBSCRIPTION_PLAN_CREATE_ERROR: "Error while creating subscription plan",
+        SUBSCRIPTION_PLAN_NOT_FOUND: "Subscription plan not found",
         APPLICATION_CREATE_ERROR: "Error while creating application",
         APPLICATION_UPDATE_ERROR: "Error while updating application",
         APPLICATION_DELETE_ERROR: "Error while deleting application",
@@ -273,7 +285,13 @@ module.exports = {
         KEY_MANAGER_RETRIEVE_ERROR: "Error while retrieving key manager",
         KEY_MANAGER_NOT_FOUND: "Key manager not found",
         KEY_MANAGER_ENCRYPTION_ERROR: "Key manager encryption key not configured",
+        WEBHOOK_SUBSCRIBER_CREATE_ERROR: "Error while creating webhook subscriber",
+        WEBHOOK_SUBSCRIBER_UPDATE_ERROR: "Error while updating webhook subscriber",
+        WEBHOOK_SUBSCRIBER_DELETE_ERROR: "Error while deleting webhook subscriber",
+        WEBHOOK_SUBSCRIBER_RETRIEVE_ERROR: "Error while retrieving webhook subscriber",
+        WEBHOOK_SUBSCRIBER_NOT_FOUND: "Webhook subscriber not found",
         ERR_SUB_EXIST: "ERR_SUB_EXIST",
+        ERR_KEY_EXIST: "ERR_KEY_EXIST",
         UNAUTHORIZED_ORG: "You are not authorized to access this organization",
         UNAUTHORIZED_API: "You are not authorized to access this API",
         API_NOT_FOUND: "Requested API not found",
@@ -297,6 +315,5 @@ module.exports = {
         'api-landing-md',
         'llms-txt',
     ],
-    FEDERATED_GATEWAY_VENDORS: ['aws'],
-    DEFAULT_PROFILE_IMAGE_URL: 'https://raw.githubusercontent.com/wso2/docs-bijira/refs/heads/main/en/devportal-theming/profile.svg'
+    DEFAULT_PROFILE_IMAGE_URL: 'https://raw.githubusercontent.com/wso2/docs-bijira/refs/heads/main/en/devportal-theming/profile.svg',
 }

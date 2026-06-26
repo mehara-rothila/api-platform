@@ -16,13 +16,13 @@
  * under the License.
  */
 
-async function subscribe(orgID, apiId, planName) {
+async function subscribe(orgID, apiId, planName, planId) {
     try {
-        const body = { apiId, subscriptionPlanName: planName };
+        const body = { apiId, subscriptionPlanId: planId };
 
-        const response = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions`, {
+        const response = await fetch(devportalApi.org(orgID, '/subscriptions'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() },
             body: JSON.stringify(body),
         });
 
@@ -38,7 +38,7 @@ async function subscribe(orgID, apiId, planName) {
             });
             const modalId = 'planModal-' + apiId;
             const modalEl = document.getElementById(modalId);
-            const isTokenBased = modalEl && modalEl.dataset.hasSubscriptionToken === 'true';
+            const isTokenBased = (modalEl && modalEl.dataset.hasSubscriptionToken === 'true') || !!responseData.subscriptionToken;
             if (isTokenBased) {
                 const token = responseData.subscriptionToken;
                 if (modalEl && modalEl.style.display && modalEl.style.display !== 'none') {
@@ -64,7 +64,8 @@ async function subscribe(orgID, apiId, planName) {
 async function handlePlanSubscription(btnElement) {
     const orgID = btnElement.dataset.orgId;
     const apiId = btnElement.dataset.apiId;
-    const planName = btnElement.dataset.policyName;
+    const planName = btnElement.dataset.planName;
+    const planId = btnElement.dataset.planId;
     const displayName = btnElement.dataset.displayName;
 
     // If a modal exists for this API and the button is NOT inside it, open the modal.
@@ -80,7 +81,7 @@ async function handlePlanSubscription(btnElement) {
 
     if (existingSubs.length === 0) {
         showSubscribeButtonLoading(btnElement);
-        await subscribe(orgID, apiId, planName);
+        await subscribe(orgID, apiId, planName, planId);
         return;
     }
 
@@ -105,9 +106,9 @@ async function handlePlanSubscription(btnElement) {
 
 async function toggleSubscriptionStatus(orgID, subscriptionId, newStatus) {
     try {
-        const response = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+        const response = await fetch(devportalApi.org(orgID, `/subscriptions/${encodeURIComponent(subscriptionId)}`), {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() },
             body: JSON.stringify({ status: newStatus }),
         });
 
@@ -134,9 +135,9 @@ function confirmDeleteSubscription(orgID, subscriptionId) {
 
 async function executeDeleteSubscription(orgID, subscriptionId) {
     try {
-        const response = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+        const response = await fetch(devportalApi.org(orgID, `/subscriptions/${encodeURIComponent(subscriptionId)}`), {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() },
         });
 
         if (response.ok) {
@@ -154,6 +155,7 @@ async function executeDeleteSubscription(orgID, subscriptionId) {
 
 async function runPendingPlanSwitch(orgID, apiId, planName, displayName, subscriptionId) {
     const btnElement = window.__pendingPlanSwitchBtn;
+    const planId = btnElement ? btnElement.dataset.planId : undefined;
     window.__pendingPlanSwitchBtn = null;
 
     if (btnElement && typeof showSubscribeButtonLoading === 'function') {
@@ -161,9 +163,9 @@ async function runPendingPlanSwitch(orgID, apiId, planName, displayName, subscri
     }
 
     try {
-        const deleteResponse = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+        const deleteResponse = await fetch(devportalApi.org(orgID, `/subscriptions/${encodeURIComponent(subscriptionId)}`), {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() },
         });
 
         if (!deleteResponse.ok) {
@@ -172,7 +174,7 @@ async function runPendingPlanSwitch(orgID, apiId, planName, displayName, subscri
             return;
         }
 
-        await subscribe(orgID, apiId, planName);
+        await subscribe(orgID, apiId, planName, planId);
     } catch (error) {
         await showAlert(`Error during plan change: ${error.message}`, 'error');
     }
@@ -202,7 +204,7 @@ async function refreshLandingPageSubscriptions() {
     if (!apiId) { window.location.reload(); return; }
 
     try {
-        var resp = await fetch('/devportal/organizations/' + encodeURIComponent(orgID) + '/subscriptions?apiId=' + encodeURIComponent(apiId), { headers: { 'Content-Type': 'application/json' } });
+        var resp = await fetch(devportalApi.org(orgID, '/subscriptions?apiId=' + encodeURIComponent(apiId)), { headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() } });
         if (!resp.ok) { window.location.reload(); return; }
         var data = await resp.json();
         var existing = data.list || data || [];
@@ -230,7 +232,7 @@ async function refreshLandingPageSubscriptions() {
                 }
             }
             var modalEl = document.getElementById('planModal-' + apiId);
-            var isTokenBased = modalEl && modalEl.dataset.hasSubscriptionToken === 'true';
+            var isTokenBased = (modalEl && modalEl.dataset.hasSubscriptionToken === 'true') || existing.some(function(s) { return !!s.subscriptionToken; });
 
             existingSection.innerHTML = '<div class="container-header mb-4">Subscriptions</div>';
             var table = document.createElement('table');
@@ -325,8 +327,8 @@ async function refreshLandingPageSubscriptions() {
         planCards.forEach(function(card) {
             var btn = card.querySelector('.subscription-plan-subscribe-btn, .subscribe-btn, .current-plan-btn');
             if (!btn) return;
-            var policyName = (btn.dataset.policyName || '').toLowerCase();
-            if (activePlanNames.indexOf(policyName) !== -1) {
+            var planName = (btn.dataset.planName || '').toLowerCase();
+            if (activePlanNames.indexOf(planName) !== -1) {
                 btn.textContent = 'Current Plan';
                 btn.disabled = true;
                 btn.classList.add('disabled', 'current-plan-btn');
@@ -402,7 +404,7 @@ async function fetchTokenIfNeeded(subscriptionId) {
     const orgID = window.__subscriptionOrgID;
     if (!orgID) return null;
     try {
-        const resp = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions/${encodeURIComponent(subscriptionId)}`, { headers: { 'Content-Type': 'application/json' } });
+        const resp = await fetch(devportalApi.org(orgID, `/subscriptions/${encodeURIComponent(subscriptionId)}`), { headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() } });
         if (!resp.ok) return null;
         const data = await resp.json();
         const token = data.subscriptionToken;

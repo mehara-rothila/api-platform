@@ -31,7 +31,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-main-api-v1.0
@@ -74,7 +74,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I update the API "api-level-url-stable-main-api-v1.0" with this configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-main-api-v1.0
@@ -126,7 +126,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-sandbox-api-v1.0
@@ -168,7 +168,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I update the API "api-level-url-stable-sandbox-api-v1.0" with this configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-sandbox-api-v1.0
@@ -221,7 +221,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-default-api-v1.0
@@ -261,7 +261,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-collision-api-v1.0
@@ -322,7 +322,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-shared-a-v1.0
@@ -345,7 +345,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-shared-b-v1.0
@@ -411,7 +411,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-scheme-api-v1.0
@@ -450,7 +450,7 @@ Feature: API-Level Upstream URL-Stable Cluster Naming
     Given I authenticate using basic auth as "admin"
     When I update the API "api-level-url-stable-scheme-api-v1.0" with this configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: api-level-url-stable-scheme-api-v1.0

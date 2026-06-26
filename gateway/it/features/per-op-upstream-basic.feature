@@ -29,7 +29,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-fm-api-v1.0
@@ -67,7 +67,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-fs-api-v1.0
@@ -105,7 +105,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-om-api-v1.0
@@ -157,7 +157,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-os-api-v1.0
@@ -201,7 +201,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-sf-api-v1.0
@@ -247,7 +247,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-mf-api-v1.0
@@ -293,7 +293,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-both-api-v1.0
@@ -352,7 +352,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-eds-api-v1.0
@@ -390,7 +390,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I update the API "per-op-basic-eds-api-v1.0" with this configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-eds-api-v1.0
@@ -433,7 +433,7 @@ Feature: Per-Operation Upstream Basic Routing
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-basic-sbhr-api-v1.0

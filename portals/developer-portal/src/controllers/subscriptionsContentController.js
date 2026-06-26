@@ -20,9 +20,10 @@ const { renderTemplateFromAPI, renderTemplate } = require('../utils/util');
 const { config } = require('../config/configLoader');
 const logger = require('../config/logger');
 const constants = require('../utils/constants');
-const adminDao = require('../dao/admin');
-const apiDao = require('../dao/apiMetadata');
-const subDao = require('../dao/subscription');
+const orgDao = require('../dao/organizationDao');
+const apiDao = require('../dao/apiDao');
+const apiFileDao = require('../dao/apiFileDao');
+const subDao = require('../dao/subscriptionDao');
 const apiMetadataService = require('../services/apiMetadataService');
 const { apiUsesApiKeySecurity } = require('../utils/apiDefinitionUtil');
 
@@ -33,10 +34,8 @@ const loadSubscriptions = async (req, res) => {
     const { orgName, viewName } = req.params;
 
     try {
-        const orgDetails = await adminDao.getOrganization(orgName);
+        const orgDetails = await orgDao.get(orgName);
         const orgID = orgDetails.ORG_ID;
-        const cpOrgID = orgDetails.ORGANIZATION_IDENTIFIER;
-        req.cpOrgID = cpOrgID;
 
         if (!req.user) {
             return res.redirect(`/${orgName}${constants.ROUTE.VIEWS_PATH}${viewName}/login`);
@@ -45,19 +44,18 @@ const loadSubscriptions = async (req, res) => {
 
         let allSubscriptions = [];
         try {
-            const localSubs = await subDao.listSubscriptions(orgID);
+            const createdBy = req.user && req.user.sub;
+            const localSubs = await subDao.list(orgID, { createdBy });
             allSubscriptions = localSubs.map(sub => ({
                 id: sub.SUB_ID,
                 type: 'TOKEN_BASED',
                 apiName: sub.DP_API_METADATA?.API_NAME || '',
                 apiVersion: sub.DP_API_METADATA?.API_VERSION || '',
                 apiHandle: sub.DP_API_METADATA?.API_HANDLE || '#',
-                planName: sub.DP_SUBSCRIPTION_POLICY?.POLICY_NAME || '',
-                applicationName: null,
-                applicationId: null,
+                planName: sub.DP_SUBSCRIPTION_PLAN?.PLAN_NAME || '',
                 status: sub.STATUS,
                 subscriptionToken: sub.SUB_TOKEN,
-                createdAt: null,
+                createdAt: sub.CREATED_AT || null,
             }));
         } catch (err) {
             logger.warn('Failed to load subscriptions', {
@@ -107,17 +105,15 @@ const loadAPISubscriptions = async (req, res) => {
     const { orgName, viewName, apiHandle } = req.params;
 
     try {
-        const orgDetails = await adminDao.getOrganization(orgName);
+        const orgDetails = await orgDao.get(orgName);
         const orgID = orgDetails.ORG_ID;
-        const cpOrgID = orgDetails.ORGANIZATION_IDENTIFIER;
-        req.cpOrgID = cpOrgID;
 
         if (!req.user) {
             return res.redirect(`/${orgName}${constants.ROUTE.VIEWS_PATH}${viewName}/login`);
         }
         const devportalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
 
-        const apiID = await apiDao.getAPIId(orgID, apiHandle);
+        const apiID = await apiDao.getId(orgID, apiHandle);
         if (!apiID) {
             const templateContent = {
                 baseUrl: '/' + orgName + constants.ROUTE.VIEWS_PATH + viewName,
@@ -134,7 +130,7 @@ const loadAPISubscriptions = async (req, res) => {
             const images = metaData.apiInfo?.apiImageMetadata;
             if (images) {
                 for (const key in images) {
-                    images[key] = `${constants.ROUTE.DEVPORTAL_ASSETS_BASE_PATH}${orgID}${constants.ROUTE.API_FILE_PATH}${apiID}${constants.API_TEMPLATE_FILE_NAME}${images[key]}`;
+                    images[key] = `${constants.DEVPORTAL_API.orgPath(orgID)}${constants.ROUTE.API_FILE_PATH}${apiID}${constants.API_TEMPLATE_FILE_NAME}${images[key]}`;
                 }
             }
         } else {
@@ -142,7 +138,8 @@ const loadAPISubscriptions = async (req, res) => {
         }
         let allSubscriptions = [];
         try {
-            const localSubs = await subDao.listSubscriptions(orgID, { apiId: apiID });
+            const createdBy = req.user && req.user.sub;
+            const localSubs = await subDao.list(orgID, { apiId: apiID, createdBy });
             allSubscriptions = localSubs.map(sub => ({
                 id: sub.SUB_ID,
                 type: 'TOKEN_BASED',
@@ -150,12 +147,10 @@ const loadAPISubscriptions = async (req, res) => {
                 apiVersion: sub.DP_API_METADATA?.API_VERSION || metaData?.apiInfo?.apiVersion || '',
                 apiHandle: sub.DP_API_METADATA?.API_HANDLE || apiHandle,
                 apiRefId: sub.API_ID,
-                planName: sub.DP_SUBSCRIPTION_POLICY?.POLICY_NAME || '',
-                applicationName: null,
-                applicationId: null,
+                planName: sub.DP_SUBSCRIPTION_PLAN?.PLAN_NAME || '',
                 status: sub.STATUS,
                 subscriptionToken: sub.SUB_TOKEN,
-                createdAt: null,
+                createdAt: sub.CREATED_AT || null,
             }));
         } catch (err) {
             logger.warn('Failed to load subscriptions for API', {
@@ -174,8 +169,8 @@ const loadAPISubscriptions = async (req, res) => {
         let apiDefinitionForNav = null;
         if (metaData?.apiInfo?.apiType !== constants.API_TYPE.GRAPHQL && metaData?.apiInfo?.apiType !== constants.API_TYPE.MCP) {
             try {
-                const apiFile = await apiDao.getAPIDoc(constants.DOC_TYPES.API_DEFINITION, orgID, apiID);
-                apiDefinitionForNav = apiFile?.API_FILE?.toString(constants.CHARSET_UTF8) || null;
+                const apiFile = await apiFileDao.getDoc(constants.DOC_TYPES.API_DEFINITION, orgID, apiID);
+                apiDefinitionForNav = apiFile?.FILE_CONTENT?.toString(constants.CHARSET_UTF8) || null;
             } catch (definitionErr) {
                 logger.debug('Could not load API definition for API keys nav check', {
                     orgID,
@@ -195,6 +190,7 @@ const loadAPISubscriptions = async (req, res) => {
             apiHandle: apiHandle,
             isReadOnlyMode: config.readOnlyMode,
             showApiKeysNav: apiUsesApiKeySecurity(metaData, apiDefinitionForNav),
+            showSubscriptionsNav: (metaData?.subscriptionPlans || []).length > 0,
         };
 
         html = await renderTemplateFromAPI(templateContent, orgID, orgName, 'pages/api-subscriptions', viewName);

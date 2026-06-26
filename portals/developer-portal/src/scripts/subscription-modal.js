@@ -77,7 +77,7 @@ async function prepareSubscriptionModal(modalId) {
     }
 
     try {
-        const resp = await fetch(`/devportal/organizations/${encodeURIComponent(orgID)}/subscriptions?apiId=${encodeURIComponent(apiRefId)}`, { headers: { 'Content-Type': 'application/json' } });
+        const resp = await fetch(devportalApi.org(orgID, `/subscriptions?apiId=${encodeURIComponent(apiRefId)}`), { headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.devportalApi.csrfToken() } });
         if (!resp.ok) throw new Error('Failed to fetch subscriptions');
         const data = await resp.json();
 
@@ -212,7 +212,8 @@ async function prepareSubscriptionModal(modalId) {
                 btn.textContent = 'Subscribe';
                 btn.dataset.orgId = orgID;
                 btn.dataset.apiId = apiId;
-                btn.dataset.policyName = plan.policyName || plan.subscriptionPlanName || '';
+                btn.dataset.planId = plan.planID || plan.planId || '';
+                btn.dataset.planName = plan.planName || plan.subscriptionPlanName || '';
                 btn.dataset.displayName = plan.displayName || plan.subscriptionPlanName || '';
                 if (window.isReadOnly) {
                     btn.disabled = true;

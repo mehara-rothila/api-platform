@@ -143,24 +143,6 @@ const SAMPLES = [
         orgConfiguration: {},
     }],
 
-    // Identity Providers — IdentityProviderDTO output (src/dto/identityProvider.js)
-    ['createIdentityProvider', 201, {
-        name: 'IS', issuer: 'https://idp/iss', authorizationURL: 'https://idp/auth',
-        tokenURL: 'https://idp/token', clientId: 'cid', callbackURL: 'http://cb',
-        scope: 'openid', logoutURL: 'http://lo', logoutRedirectURI: 'http://lr',
-        userInfoURL: 'http://ui',
-    }],
-    ['updateIdentityProvider', 200, {
-        name: 'IS', issuer: 'https://idp/iss', authorizationURL: 'https://idp/auth',
-        tokenURL: 'https://idp/token', clientId: 'cid', callbackURL: 'http://cb',
-        scope: 'openid', logoutURL: 'http://lo', logoutRedirectURI: 'http://lr',
-    }],
-    ['getIdentityProvider', 200, {
-        name: 'IS', issuer: 'https://idp/iss', authorizationURL: 'https://idp/auth',
-        tokenURL: 'https://idp/token', clientId: 'cid', callbackURL: 'http://cb',
-        scope: 'openid', logoutURL: 'http://lo', logoutRedirectURI: 'http://lr',
-    }],
-
     // Org content — adminService.createOrgContent L402, updateOrgContent L488 (both 201)
     ['createOrgContent', 201, { orgId: 'org-1', fileName: 'theme.zip' }],
     ['updateOrgContent', 201, { orgId: 'org-1', fileName: 'theme.zip' }],
@@ -168,21 +150,16 @@ const SAMPLES = [
         { orgId: 'org-1', fileName: 'main.css', fileContent: 'body{}' },
     ]],
 
-    // Providers — adminService.createProvider L599 emits providerData object
-    ['createProvider', 201, { orgId: 'org-1', name: 'WSO2', providerURL: 'https://wso2.com' }],
-    ['updateProvider', 200, { orgId: 'org-1', name: 'WSO2', providerURL: 'https://wso2.com' }],
-    ['getProviders', 200, [{ name: 'WSO2', providerURL: 'https://wso2.com' }]],
-
     // Subscriptions — subscriptionService.formatSubscriptionResponse shape
     ['createSubscription', 201, {
         subscriptionId: 'sub-12345', subscriptionToken: 'tok-abc123',
-        status: 'ACTIVE', gatewayType: 'wso2/api-platform',
+        status: 'ACTIVE',
         apiId: 'api-7f4c2a6b', subscriptionPlanName: 'Gold',
         createdAt: '2026-05-07T08:30:00.000Z',
     }],
     ['updateSubscription', 200, {
         subscriptionId: 'sub-12345', subscriptionToken: 'tok-abc123',
-        status: 'INACTIVE', gatewayType: 'wso2/api-platform',
+        status: 'INACTIVE',
         apiId: 'api-7f4c2a6b', subscriptionPlanName: 'Gold',
         createdAt: '2026-05-07T08:30:00.000Z',
     }],
@@ -195,14 +172,14 @@ const SAMPLES = [
     // createLabels echoes req.body — clients send LabelRequest[]
     ['createLabels', 201, [{ name: 'premium', displayName: 'Premium APIs' }]],
 
-    // Subscription Policies — single-create returns DTO; bulk-disabled returns {message}
-    ['addSubscriptionPolicies', 201, {
-        policyID: 'p1', policyName: 'Bronze', displayName: 'Bronze',
+    // Subscription Plans — single-create returns DTO; bulk-disabled returns {message}
+    ['addSubscriptionPlans', 201, {
+        planID: 'p1', planName: 'Bronze', displayName: 'Bronze',
         billingPlan: 'FREE', description: 'desc', requestCount: 100,
         orgID: 'org-1', pricingModel: 'flat', currency: 'usd',
         billingPeriod: 'month', flatAmount: 0, unitAmount: 0, pricingMetadata: {},
     }],
-    ['addSubscriptionPolicies', 200, { message: 'Bulk creation disabled' }],
+    ['addSubscriptionPlans', 200, { message: 'Bulk creation disabled' }],
 
     // API Flows — apiFlowService.createAPIFlow L207 emits {apiFlowId, name, status}
     ['createAPIFlow', 201, { apiFlowId: 'f1', name: 'flow1', status: 'PUBLISHED' }],
@@ -249,7 +226,7 @@ const SAMPLES = [
         total: 1,
         events: [{
             eventId: 'evt-abc123', eventType: 'apikey.generated',
-            orgId: 'org-default', gatewayType: 'default',
+            orgId: 'org-default',
             aggregateType: 'apikey', aggregateId: 'key-12345',
             status: 'ALL_DELIVERED', occurredAt: '2026-05-07T08:30:00.000Z',
             deliveries: [{
@@ -263,7 +240,7 @@ const SAMPLES = [
     }],
     ['getWebhookEvent', 200, {
         eventId: 'evt-abc123', eventType: 'apikey.generated',
-        orgId: 'org-default', gatewayType: 'default',
+        orgId: 'org-default',
         aggregateType: 'apikey', aggregateId: 'key-12345',
         status: 'ALL_DELIVERED', occurredAt: '2026-05-07T08:30:00.000Z',
         deliveries: [{

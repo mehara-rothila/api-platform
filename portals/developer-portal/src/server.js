@@ -21,14 +21,18 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./config/logger');
 const { config } = require('./config/configLoader');
-const constants = require('./utils/constants');
 const webhookDispatcher = require('./services/webhooks/dispatcher');
 const webhookDeliveryWorker = require('./services/webhooks/deliveryWorker');
+const sequelize = require('./db/sequelizeConfig');
+const { seedDefaultOrg } = require('./services/seederService');
 const app = require('./app');
+
+const liveReload = process.env.NODE_ENV === 'development' ? require('./liveReload') : null;
 
 const PORT = process.env.PORT || config.defaultPort;
 
 function startBackgroundServices() {
+    if (config.designMode?.enabled) return;
     try {
         webhookDispatcher.start();
         webhookDeliveryWorker.start();
@@ -43,25 +47,36 @@ function startBackgroundServices() {
 
 function logStartupInfo() {
     logger.info(`Developer Portal V2 is running on port ${PORT}`);
-    logger.info(`Mode: ${config.mode}`);
-
-    if (config.mode === constants.DEV_MODE) {
-        logger.info('⚠️  Since you are in DEV mode, ensure default content is available at configured pathToContent ' +
-            'and mock folder must exist in root directory');
+    if (config.designMode?.enabled) {
+        logger.info('Design Mode enabled — no DB or IDP required');
+        logger.info(`  Layout templates: ${config.designMode.pathToLayout}`);
+        logger.info(`  Sample APIs:      ${config.designMode.apiSamplesPath}`);
     }
 
-    const visitUrl = config.baseUrl + (config.mode === constants.DEV_MODE ? "/views/default" : "/<organization>/views/default");
+    const visitUrl = config.baseUrl + (config.designMode?.enabled ? "/views/default" : "/<organization>/views/default");
     logger.info(`Visit ${visitUrl}`);
 }
 
 function onListening() {
     logStartupInfo();
     startBackgroundServices();
+    seedDefaultOrg().catch(err =>
+        logger.error('Unexpected error during default org seeding', { error: err.message })
+    );
 }
 
-if (config.advanced.http) {
-    http.createServer(app).listen(PORT, '0.0.0.0', onListening);
-} else {
+let server;
+
+async function startServer() {
+    // Sync database schema for SQLite in production mode
+    if (config.db.dialect === 'sqlite' && !config.designMode?.enabled) {
+        await sequelize.sync();
+        logger.info('SQLite schema synced');
+    }
+
+    if (config.advanced.http || config.designMode?.enabled) {
+        server = http.createServer(app).listen(PORT, '0.0.0.0', onListening);
+    } else {
     try {
         const certPath = path.resolve(config.serverCerts.pathToCert);
         const keyPath = path.resolve(config.serverCerts.pathToPK);
@@ -70,7 +85,7 @@ if (config.advanced.http) {
         const serverKey = fs.readFileSync(keyPath);
         const caCert = fs.readFileSync(path.resolve(config.serverCerts.pathToCA));
 
-        https.createServer({
+        server = https.createServer({
             key: serverKey,
             cert: serverCert,
             ca: caCert,
@@ -86,7 +101,10 @@ if (config.advanced.http) {
         });
         process.exit(1);
     }
+    }
 }
+
+startServer();
 
 // Handle Uncaught Exceptions
 process.on('uncaughtException', (err) => {
@@ -95,6 +113,7 @@ process.on('uncaughtException', (err) => {
         stack: err.stack,
         type: 'uncaughtException'
     });
+    process.exit(1);
 });
 
 // Handle Unhandled Rejections
@@ -104,6 +123,7 @@ process.on('unhandledRejection', (reason, promise) => {
         promise: promise?.toString(),
         type: 'unhandledRejection'
     });
+    process.exit(1);
 });
 
 // Graceful shutdown handlers
@@ -113,9 +133,30 @@ const gracefulShutdown = (signal) => {
         message: `Received ${signal}. Gracefully shutting down...`
     });
 
-    logger.info('Application shutdown complete');
-    process.exit(0);
+    const done = () => {
+        logger.info('Application shutdown complete');
+        process.exit(0);
+    };
+
+    if (server) {
+        // Close keep-alive connections immediately so server.close() doesn't hang
+        server.closeAllConnections();
+        server.close(done);
+    } else {
+        done();
+    }
+
+    // Force-exit after 3 s if graceful close hangs (e.g. long-polling connections)
+    setTimeout(() => {
+        logger.warn('Graceful shutdown timed out — forcing exit');
+        process.exit(1);
+    }, 3000).unref();
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// nodemon sends SIGUSR2 to restart; process.once so the next spawned process can re-register
+process.once('SIGUSR2', () => {
+    if (liveReload) liveReload.notify();
+    gracefulShutdown('SIGUSR2');
+});

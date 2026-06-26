@@ -16,9 +16,8 @@
  * under the License.
  */
 const { Sequelize, DataTypes } = require('sequelize');
-const sequelize = require('../db/sequelize');
-const Provider = require('./provider');
-const View = require('./views');
+const sequelize = require('../db/sequelizeConfig');
+const View = require('./view');
 
 const Organization = sequelize.define('DP_ORGANIZATION', {
     ORG_ID: {
@@ -48,37 +47,13 @@ const Organization = sequelize.define('DP_ORGANIZATION', {
         allowNull: false,
         unique: true
     },
-    ROLE_CLAIM_NAME: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
-    ORGANIZATION_CLAIM_NAME: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
     ORGANIZATION_IDENTIFIER: {
         type: DataTypes.STRING,
         allowNull: false
     },
-    ADMIN_ROLE: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
-    SUPER_ADMIN_ROLE: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
-    SUBSCRIBER_ROLE: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },
-    GROUPS_CLAIM_NAME: {
-        type: DataTypes.STRING,
-        allowNull: true
-    },   
     ORG_CONFIG: {
         type: DataTypes.JSON,
-        allowNull: true
+        allowNull: false
     },
 }, {
     timestamps: false,
@@ -111,7 +86,7 @@ const OrgContent = sequelize.define('DP_ORGANIZATION_ASSETS', {
     ORG_ID: {
         type: DataTypes.UUID,
         allowNull: false,
-        forignKey: true,
+        foreignKey: true,
     },
     VIEW_ID: {
         type: DataTypes.UUID,
@@ -119,12 +94,12 @@ const OrgContent = sequelize.define('DP_ORGANIZATION_ASSETS', {
     }
 }, {
     timestamps: false,
-    tableName: 'DP_ORGANIZATION_ASSETS'
-}, {
+    tableName: 'DP_ORGANIZATION_ASSETS',
     indexes: [
         {
+            name: 'UQ_ORGANIZATION_ASSETS_TYPE_NAME_PATH_ORG_VIEW',
             unique: true,
-            fields: ['FILE_TYPE', 'FILE_NAME', 'FILE_PATH', 'ORG_ID']
+            fields: ['FILE_TYPE', 'FILE_NAME', 'FILE_PATH', 'ORG_ID', 'VIEW_ID']
         }
     ]
 });
@@ -138,11 +113,11 @@ Organization.hasMany(OrgContent, {
     onDelete: 'CASCADE',
 });
 
-Provider.belongsTo(Organization, {
+View.belongsTo(Organization, {
     foreignKey: 'ORG_ID',
 });
 
-Organization.hasMany(Provider, {
+Organization.hasMany(View, {
     foreignKey: 'ORG_ID',
     onDelete: 'CASCADE',
 });

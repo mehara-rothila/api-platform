@@ -29,7 +29,7 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-ref-api-v1.0
@@ -89,7 +89,7 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-mixed-api-v1.0
@@ -141,7 +141,7 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-prec-op-api-v1.0
@@ -207,7 +207,7 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-prec-api-api-v1.0
@@ -260,7 +260,7 @@ Feature: Per-Operation Upstream Ref
     Given I authenticate using basic auth as "admin"
     When I deploy this API configuration:
       """
-      apiVersion: gateway.api-platform.wso2.com/v1alpha1
+      apiVersion: gateway.api-platform.wso2.com/v1
       kind: RestApi
       metadata:
         name: per-op-ref-rewrite-api-v1.0

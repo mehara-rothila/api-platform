@@ -1,15 +1,16 @@
 
 <h1 id="wso2-api-developer-portal-core-devportal-routes">WSO2 API Developer Portal Core - Devportal Routes v1.0.0</h1>
 
-Fine-grained Developer Portal API for managing organizations, identity providers, providers,
+Fine-grained Developer Portal API for managing organizations,
 API metadata and content, applications, subscriptions, application credentials, and API flows.
 
-All paths are served under the `/devportal` base path. Operations declare the least-privilege
-OAuth2 scopes required for each resource action.
+Organization-scoped resources are served under `/o/{orgId}/devportal/v1`. Operations declare
+the least-privilege OAuth2 scopes required for each resource action.
 
 Base URLs:
-* <a href="http://localhost:3000/devportal">http://localhost:3000/devportal</a>
-* <a href="https://localhost:{port}/devportal">https://localhost:{port}/devportal</a>
+* <a href="https://devportal.api-platform.io">https://devportal.api-platform.io</a>
+* <a href="http://localhost:3000">http://localhost:3000</a>
+* <a href="https://localhost:{port}">https://localhost:{port}</a>
     * **port** -  Default: 9443
 
 ## Table of Contents
@@ -24,13 +25,6 @@ Base URLs:
 - [Get an organization](organizations.md#get-an-organization)
 - [Delete an organization](organizations.md#delete-an-organization)
 
-### [Identity Providers](identity-providers.md)
-
-- [Create an identity provider](identity-providers.md#create-an-identity-provider)
-- [Update an identity provider](identity-providers.md#update-an-identity-provider)
-- [Get an identity provider](identity-providers.md#get-an-identity-provider)
-- [Delete an identity provider](identity-providers.md#delete-an-identity-provider)
-
 ### [Organization Content](organization-content.md)
 
 - [Upload organization layout content](organization-content.md#upload-organization-layout-content)
@@ -38,13 +32,6 @@ Base URLs:
 - [Get a single organization layout asset](organization-content.md#get-a-single-organization-layout-asset)
 - [Delete organization layout content](organization-content.md#delete-organization-layout-content)
 - [List organization layout assets by file type](organization-content.md#list-organization-layout-assets-by-file-type)
-
-### [Providers](providers.md)
-
-- [Create a provider](providers.md#create-a-provider)
-- [Update a provider](providers.md#update-a-provider)
-- [Get providers](providers.md#get-providers)
-- [Delete a provider](providers.md#delete-a-provider)
 
 ### [APIs](apis.md)
 
@@ -61,12 +48,13 @@ Base URLs:
 - [Get an API content file](api-content.md#get-an-api-content-file)
 - [Delete API content files](api-content.md#delete-api-content-files)
 
-### [Subscription Policies](subscription-policies.md)
+### [Subscription Plans](subscription-plans.md)
 
-- [Create subscription policies](subscription-policies.md#create-subscription-policies)
-- [Upsert subscription policies](subscription-policies.md#upsert-subscription-policies)
-- [Get a subscription policy](subscription-policies.md#get-a-subscription-policy)
-- [Delete a subscription policy](subscription-policies.md#delete-a-subscription-policy)
+- [List subscription plans](subscription-plans.md#list-subscription-plans)
+- [Create subscription plans](subscription-plans.md#create-subscription-plans)
+- [Upsert subscription plans](subscription-plans.md#upsert-subscription-plans)
+- [Get a subscription plan](subscription-plans.md#get-a-subscription-plan)
+- [Delete a subscription plan](subscription-plans.md#delete-a-subscription-plan)
 
 ### [Labels](labels.md)
 
@@ -77,11 +65,10 @@ Base URLs:
 
 ### [Applications](applications.md)
 
-- [Import an application](applications.md#import-an-application)
-- [Create an application for the authenticated user's organization](applications.md#create-an-application-for-the-authenticated-users-organization)
-- [Update an application for the authenticated user](applications.md#update-an-application-for-the-authenticated-user)
-- [Delete an application for the authenticated user](applications.md#delete-an-application-for-the-authenticated-user)
-- [Reset application throttle policy](applications.md#reset-application-throttle-policy)
+- [List applications for the authenticated user](applications.md#list-applications-for-the-authenticated-user)
+- [Create an application](applications.md#create-an-application)
+- [Update an application](applications.md#update-an-application)
+- [Delete an application](applications.md#delete-an-application)
 
 ### [Subscriptions](subscriptions.md)
 
@@ -97,6 +84,9 @@ Base URLs:
 - [List API keys](api-keys.md#list-api-keys)
 - [Regenerate an API key](api-keys.md#regenerate-an-api-key)
 - [Revoke an API key](api-keys.md#revoke-an-api-key)
+- [Associate an API key with an application](api-keys.md#associate-an-api-key-with-an-application)
+- [Remove an API key's application association](api-keys.md#remove-an-api-keys-application-association)
+- [List API keys associated with an application](api-keys.md#list-api-keys-associated-with-an-application)
 
 ### [Views](views.md)
 
@@ -133,7 +123,7 @@ Base URLs:
 
 - [Create a key manager](key-managers.md#create-a-key-manager)
 - [List key managers](key-managers.md#list-key-managers)
-- [List available key managers for developers](key-managers.md#list-available-key-managers-for-developers)
+- [Discover available key managers](key-managers.md#discover-available-key-managers)
 - [Get a key manager](key-managers.md#get-a-key-manager)
 - [Update a key manager](key-managers.md#update-a-key-manager)
 - [Delete a key manager](key-managers.md#delete-a-key-manager)
@@ -143,6 +133,15 @@ Base URLs:
 - [List webhook events](webhook-events.md#list-webhook-events)
 - [Get a webhook event](webhook-events.md#get-a-webhook-event)
 - [Retry a failed webhook delivery](webhook-events.md#retry-a-failed-webhook-delivery)
+
+### [Webhook Subscribers](webhook-subscribers.md)
+
+- [Create a webhook subscriber](webhook-subscribers.md#create-a-webhook-subscriber)
+- [List webhook subscribers](webhook-subscribers.md#list-webhook-subscribers)
+- [Get a webhook subscriber](webhook-subscribers.md#get-a-webhook-subscriber)
+- [Update a webhook subscriber](webhook-subscribers.md#update-a-webhook-subscriber)
+- [Delete a webhook subscriber](webhook-subscribers.md#delete-a-webhook-subscriber)
+- [List recent deliveries for a webhook subscriber](webhook-subscribers.md#list-recent-deliveries-for-a-webhook-subscriber)
 
 ### [Schemas](schemas.md)
 

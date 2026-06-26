@@ -2,15 +2,15 @@
 
 ## Create an API flow
 
-<a id="opIdcreateAPIFlow"></a>
+<a id="opIdcreateApiFlow"></a>
 
-`POST /organizations/{orgId}/views/{viewName}/api-flows`
+`POST /o/{orgId}/devportal/v1/views/{viewName}/api-flows`
 
 > Code samples
 
 ```shell
 
-curl -X POST http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows \
+curl -X POST https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -86,15 +86,15 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ## List API flows
 
-<a id="opIdgetAllAPIFlows"></a>
+<a id="opIdgetAllApiFlows"></a>
 
-`GET /organizations/{orgId}/views/{viewName}/api-flows`
+`GET /o/{orgId}/devportal/v1/views/{viewName}/api-flows`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -114,6 +114,8 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
+|limit|query|integer|false|Maximum number of records to return.|
+|offset|query|integer|false|Number of records to skip before returning results.|
 |orgId|path|string|true|none|
 |viewName|path|string|true|none|
 
@@ -122,23 +124,30 @@ This operation requires <strong>Basic Auth</strong> authentication.
 > 200 Response
 
 ```json
-[
-  {
-    "apiFlowId": "flow-12345",
-    "name": "Weather onboarding",
-    "handle": "weather-onboarding",
-    "description": "string",
-    "agentPrompt": "string",
-    "status": "PUBLISHED",
-    "visibility": "PUBLIC",
-    "agentVisibility": "VISIBLE",
-    "contentType": "ARAZZO",
-    "apiFlowDefinition": "string",
-    "markdownContent": "string",
-    "createdAt": "May 7, 2026",
-    "updatedAt": "string"
+{
+  "list": [
+    {
+      "apiFlowId": "flow-12345",
+      "name": "Weather onboarding",
+      "handle": "weather-onboarding",
+      "description": "string",
+      "agentPrompt": "string",
+      "status": "PUBLISHED",
+      "visibility": "PUBLIC",
+      "agentVisibility": "VISIBLE",
+      "contentType": "ARAZZO",
+      "apiFlowDefinition": "string",
+      "markdownContent": "string",
+      "createdAt": "May 7, 2026",
+      "updatedAt": "string"
+    }
+  ],
+  "pagination": {
+    "total": 42,
+    "limit": 20,
+    "offset": 0
   }
-]
+}
 ```
 
 <h3 id="list-api-flows-responses">Responses</h3>
@@ -154,20 +163,24 @@ Status Code **200**
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|*anonymous*|[[APIFlowResponse](schemas.md#schemaapiflowresponse)]|false|none|none|
-|» apiFlowId|string|false|none|none|
-|» name|string|false|none|none|
-|» handle|string|false|none|none|
-|» description|string|false|none|none|
-|» agentPrompt|string|false|none|none|
-|» status|string|false|none|none|
-|» visibility|string|false|none|none|
-|» agentVisibility|string|false|none|none|
-|» contentType|string|false|none|none|
-|» apiFlowDefinition|string¦null|false|none|none|
-|» markdownContent|string¦null|false|none|none|
-|» createdAt|string|false|none|none|
-|» updatedAt|string¦null|false|none|none|
+|» list|[[APIFlowResponse](schemas.md#schemaapiflowresponse)]|false|none|none|
+|»» apiFlowId|string|false|none|none|
+|»» name|string|false|none|none|
+|»» handle|string|false|none|none|
+|»» description|string|false|none|none|
+|»» agentPrompt|string|false|none|none|
+|»» status|string|false|none|none|
+|»» visibility|string|false|none|none|
+|»» agentVisibility|string|false|none|none|
+|»» contentType|string|false|none|none|
+|»» apiFlowDefinition|string¦null|false|none|none|
+|»» markdownContent|string¦null|false|none|none|
+|»» createdAt|string|false|none|none|
+|»» updatedAt|string¦null|false|none|none|
+|» pagination|[Pagination](schemas.md#schemapagination)|false|none|Standard pagination metadata returned with collection responses.|
+|»» total|integer|true|none|Total number of records matching the query.|
+|»» limit|integer|true|none|Maximum number of records returned in this response.|
+|»» offset|integer|true|none|Number of records skipped before this page.|
 
 #### Enumerated Values
 
@@ -178,15 +191,15 @@ Status Code **200**
 
 ## Get an API flow
 
-<a id="opIdgetAPIFlow"></a>
+<a id="opIdgetApiFlow"></a>
 
-`GET /organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId}`
+`GET /o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId}`
 
 > Code samples
 
 ```shell
 
-curl -X GET http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId} \
+curl -X GET https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -250,15 +263,15 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ## Update an API flow
 
-<a id="opIdupdateAPIFlow"></a>
+<a id="opIdupdateApiFlow"></a>
 
-`PUT /organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId}`
+`PUT /o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId}`
 
 > Code samples
 
 ```shell
 
-curl -X PUT http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId} \
+curl -X PUT https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId} \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
@@ -324,15 +337,15 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 ## Delete an API flow
 
-<a id="opIddeleteAPIFlow"></a>
+<a id="opIddeleteApiFlow"></a>
 
-`DELETE /organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId}`
+`DELETE /o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId}`
 
 > Code samples
 
 ```shell
 
-curl -X DELETE http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows/{apiFlowId} \
+curl -X DELETE https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows/{apiFlowId} \
   -u {username}:{password} \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer {access-token}'
@@ -378,13 +391,13 @@ This operation requires <strong>Basic Auth</strong> authentication.
 
 <a id="opIdgeneratePrompt"></a>
 
-`POST /organizations/{orgId}/views/{viewName}/api-flows/generate-prompt`
+`POST /o/{orgId}/devportal/v1/views/{viewName}/api-flows/generate-prompt`
 
 > Code samples
 
 ```shell
 
-curl -X POST http://localhost:3000/devportal/organizations/{orgId}/views/{viewName}/api-flows/generate-prompt \
+curl -X POST https://devportal.api-platform.io/o/{orgId}/devportal/v1/views/{viewName}/api-flows/generate-prompt \
   -u {username}:{password} \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \

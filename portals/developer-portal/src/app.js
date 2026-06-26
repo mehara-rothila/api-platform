@@ -20,34 +20,31 @@ const express = require('express');
 const { engine } = require('express-handlebars');
 const passport = require('passport');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
 const path = require('path');
 const logger = require('./config/logger');
 const { auditMiddleware } = require('./middlewares/auditLogger');
-const authRoute = require('./routes/authRoute');
-const devportalRoute = require('./routes/devportalRoute');
-const orgContent = require('./routes/orgContentRoute');
-const apiContent = require('./routes/apiContentRoute');
-const applicationContent = require('./routes/applicationsContentRoute');
-const customContent = require('./routes/customPageRoute');
-const subscriptionsContent = require('./routes/subscriptionsContentRoute');
-const mcpRegistryRoute = require('./routes/mcpRegistryRoute');
+const authRoute = require('./routes/pages/authRoute');
+const orgContent = require('./routes/pages/orgContentRoute');
+const apiContent = require('./routes/pages/apiContentRoute');
+const applicationContent = require('./routes/pages/applicationsContentRoute');
+const customContent = require('./routes/pages/customPageRoute');
+const subscriptionsContent = require('./routes/pages/subscriptionsContentRoute');
+const mcpRegistryRoute = require('./routes/pages/mcpRegistryRoute');
 const { config } = require('./config/configLoader');
 const Handlebars = require('handlebars');
 const constants = require("./utils/constants");
-const designRoute = require('./routes/designModeRoute');
-const settingsRoute = require('./routes/configureRoute');
-const apiFlowsRoute = require('./routes/apiFlowsRoute');
+const designRoute = require('./routes/pages/designModeRoute');
+const settingsRoute = require('./routes/pages/configureRoute');
+const apiFlowsRoute = require('./routes/pages/apiFlowsRoute');
 const { v4: uuidv4 } = require('uuid');
 const util = require('./utils/util');
-const pool = require('./db/pool');
+const sessionStore = require('./db/sessionStoreConfig');
 const { registerHelpers } = require('./helpers/handlebarsHelpers');
-const { configurePassport } = require('./middlewares/passport');
+const { configurePassport } = require('./middlewares/passportConfig');
 
 const app = express();
 // const secret = crypto.randomBytes(64).toString('hex');
 const sessionSecret = 'my-secret';
-const filePrefix = config.pathToContent;
 
 const SERVER_ID = uuidv4();
 
@@ -62,17 +59,12 @@ app.set('view engine', 'hbs');
 registerHelpers();
 
 app.use(session({
-    store: new pgSession({
-        pool: pool,
-        tableName: 'session',
-        pruneSessionInterval: 3600,
-        debug: (message) => logger.debug('Session store debug', { message }),
-    }),
+    store: sessionStore,
     secret: sessionSecret,
     resave: false,
     saveUninitialized: true,
     cookie: {
-        secure: !config.advanced.http,
+        secure: !config.advanced.http && !config.designMode?.enabled,
         maxAge: 60 * 60 * 1000,
     },
 }));
@@ -114,11 +106,27 @@ app.use(auditMiddleware({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Expose the per-session CSRF token as a browser-readable cookie (double-submit
+// pattern). Mutating fetches echo it back as X-CSRF-Token; the value matches
+// what requireCsrfForMutatingApi expects (getSessionCsrfToken).
+const { getSessionCsrfToken } = require('./middlewares/csrfProtection');
+app.use((req, res, next) => {
+    if (req.session) {
+        res.cookie('XSRF-TOKEN', getSessionCsrfToken(req), { sameSite: 'lax', path: '/' });
+    }
+    next();
+});
+
 
 configurePassport(SERVER_ID);
 
 app.use(constants.ROUTE.TECHNICAL_STYLES, express.static(path.join(require.main.filename, '../styles')));
 app.use(constants.ROUTE.TECHNICAL_SCRIPTS, express.static(path.join(require.main.filename, '../scripts')));
+
+// Dev live-reload SSE endpoint — must be registered before org-resolution routes
+if (process.env.NODE_ENV === 'development') {
+    require('./liveReload').setup(app);
+}
 
 // Redirect unrecognised root-level paths (e.g. /robots.txt, /sitemap.xml) before
 // the /:orgName route can treat them as org IDs.
@@ -131,22 +139,33 @@ app.use((req, res, next) => {
 });
 
 //backend routes
-if (config.advanced?.openApiValidator?.enabled) {
-    logger.info('Mounting spec-driven /devportal router (advanced.useOpenApiValidator=true)');
-    const devportalApiRouter = require('./openapi/devportalApiRouter');
-    app.use(constants.ROUTE.DEV_PORTAL, devportalApiRouter);
-} else {
-    app.use(constants.ROUTE.DEV_PORTAL, devportalRoute);
-}
+// Spec-driven devportal router (express-openapi-validator): request validation +
+// fine-grained OAuth2 scope enforcement, dispatching by operationId to
+// src/openapi/handlers. Mounted at root since spec paths are root-relative
+// (/o/{orgId}/devportal/v1/..., /applications, /login, ...). Registered before the
+// page route tree so unmatched requests fall through to it.
+const devportalApiRouter = require('./routes/api/devportalApiRouter');
+app.use(constants.ROUTE.DEFAULT, devportalApiRouter);
 
 // MCP Server Registry (OpenAPI v0.1)
 app.use('/registry/:orgHandle', mcpRegistryRoute);
 app.use('/:orgHandle/registry', mcpRegistryRoute);
 
-if (config.mode === constants.DEV_MODE) {
-    app.use(constants.ROUTE.STYLES, express.static(path.join(process.cwd(), filePrefix + 'styles')));
-    app.use(constants.ROUTE.IMAGES, express.static(path.join(process.cwd(), filePrefix + 'images')));
-    app.use(constants.ROUTE.MOCK, express.static(path.join(process.cwd(), filePrefix + 'mock')));
+if (config.designMode?.enabled) {
+    const sampleApiLoader = require('./utils/sampleApiLoader');
+    const layoutPath = config.designMode.pathToLayout;
+    // Serve styles/images from pathToLayout first, fall back to src/defaultContent/
+    app.use(constants.ROUTE.STYLES, express.static(path.resolve(process.cwd(), layoutPath, 'styles')));
+    app.use(constants.ROUTE.STYLES, express.static(path.join(process.cwd(), './src/defaultContent/styles')));
+    app.use(constants.ROUTE.IMAGES, express.static(path.resolve(process.cwd(), layoutPath, 'images')));
+    app.use(constants.ROUTE.IMAGES, express.static(path.join(process.cwd(), './src/defaultContent/images')));
+    app.use(constants.ROUTE.MOCK, express.static(path.join(process.cwd(), config.designMode.apiSamplesPath)));
+    // Serve API definition files by resolving the handle to the actual directory
+    app.get('/mock/:apiHandle/definition.yml', (req, res) => {
+        const content = sampleApiLoader.getDefinition(req.params.apiHandle, config.designMode.apiSamplesPath);
+        if (!content) return res.status(404).send('Not found');
+        res.type('text/yaml').send(content);
+    });
     app.use(constants.ROUTE.DEFAULT, designRoute);
 } else {
     app.use(constants.ROUTE.STYLES, express.static(path.join(process.cwd(), './src/defaultContent/' + 'styles')));

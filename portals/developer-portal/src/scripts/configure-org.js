@@ -46,20 +46,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    //update IDP
-    const editIDPButton = document.getElementById('idpEdit');
-    if (editIDPButton) {
-        editIDPButton.addEventListener('click', function () {
-            const details = this.closest('.organization').querySelector('.organization-details');
-            if (details.style.display === 'block') {
-                details.style.display = 'none';
-                this.textContent = 'Edit';
-            } else {
-                details.style.display = 'block';
-                this.textContent = 'Close';
-            }
-        });
-    }
+
 
     const editOrgPButton = document.getElementById('orgEdit');
     if (editOrgPButton) {
@@ -141,67 +128,6 @@ function sanitizeInput(input) {
     return div.innerHTML;
 }
 
-async function createIDP(orgID) {
-
-    const formData = new FormData(document.getElementById("createIDP"));
-    const data = {};
-    formData.forEach((value, key) => {
-        data[key] = sanitizeInput(value);
-    });
-    data['scope'] = 'openid';
-    const response = await fetch(`/devportal/organizations/${orgID}/identityProvider`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-    });
-    if (response.ok) {
-        window.location.href = 'configure';
-    } else {
-        showAlert(`Field validation failed`, `error`);
-    }
-
-    // Clear the form
-    document.getElementById('providerId').value = '';
-    document.getElementById('providerUrl').value = '';
-}
-
-async function editIDP(orgID, formID) {
-
-    const editIDP = document.getElementById(formID);
-    const formData = new FormData(editIDP);
-    const data = {};
-    formData.forEach((value, key) => {
-        data[key] = sanitizeInput(value);
-    });
-    data['scope'] = 'openid';
-    const response = await fetch(`/devportal/organizations/${orgID}/identityProvider`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-    });
-    if (response.ok) {
-        window.location.href = 'configure';
-    } else {
-        showAlert(`Field validation failed`, `error`);
-    }
-}
-
-async function deleteIDP(orgID) {
-
-    const response = await fetch(`/devportal/organizations/${orgID}/identityProvider`, {
-        method: 'DELETE',
-    });
-    if (response.ok) {
-        window.location.href = 'configure';
-    } else {
-        showAlert(`Field validation failed`, `error`);
-    }
-}
-
 async function updateOrgContent(orgID) {
 
     const zipFile = document.getElementById('editZipFile');
@@ -233,7 +159,7 @@ async function uploadContent(orgID) {
     formData.append('file', zipFile.files[0]);
 
     const view = document.getElementById('uploadViewContent').value;
-    const response = await fetch(`/devportal/organizations/${orgID}/views/${view}/layout`, {
+    const response = await fetch(devportalApi.org(orgID, `/views/${view}/layout`), {
         method: 'PUT',
         body: formData,
         credentials: 'same-origin'
@@ -245,24 +171,6 @@ async function uploadContent(orgID) {
     } else {
         const error = await response.text();
         showAlert(`Upload failed: ${error}`, 'error');
-    }
-}
-
-async function deleteProvider(orgID, name) {
-    try {
-        const response = await fetch(
-            `/devportal/organizations/${encodeURIComponent(orgID)}/provider?name=${encodeURIComponent(name)}`,
-            { method: 'DELETE', credentials: 'same-origin' }
-        );
-        if (response.ok || response.status === 204) {
-            await showAlert('Provider deleted successfully.', 'success');
-            window.location.href = 'configure';
-        } else {
-            const errorText = await response.text().catch(() => response.statusText || 'Unknown error');
-            showAlert(`Failed to delete provider: ${errorText}`, 'error');
-        }
-    } catch (e) {
-        showAlert(`Error deleting provider: ${e.message}`, 'error');
     }
 }
 
@@ -310,7 +218,7 @@ async function editView(existingLabels, labelsContainerID, displayNameID, nameID
         addedLabels: sanitizAddedLabels,
         removedLabels: sanitizeRemovedLabels
     }
-    const response = await fetch(`/devportal/organizations/${orgID}/views/${name}`, {
+    const response = await fetch(devportalApi.org(orgID, `/views/${name}`), {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
@@ -326,7 +234,7 @@ async function editView(existingLabels, labelsContainerID, displayNameID, nameID
 
 async function deleteView(orgID, viewName) {
     
-    const response = await fetch(`/devportal/organizations/${orgID}/views/${viewName}`, {
+    const response = await fetch(devportalApi.org(orgID, `/views/${viewName}`), {
         method: 'DELETE',
     });
     if (response.ok) {
@@ -347,8 +255,9 @@ async function addLabels(orgID, orgLabels) {
 
     if (removedLabels.length > 0) {
         const sanitizeDelete = removedLabels.map(label => sanitizeInput(label));
-        const labelName = sanitizeDelete.join(",");
-        const response = await fetch(`/devportal/organizations/${orgID}/labels?names=${labelName}`, {
+        // Encode each name individually so spaces/reserved characters within a label
+        const labelName = sanitizeDelete.map(label => encodeURIComponent(label)).join(",");
+        const response = await fetch(devportalApi.org(orgID, `/labels?names=${labelName}`), {
             method: "DELETE",
             headers: {
                 'Content-Type': 'application/json',
@@ -369,7 +278,7 @@ async function addLabels(orgID, orgLabels) {
         });
     });
  
-    const response = await fetch(`/devportal/organizations/${orgID}/labels`, {
+    const response = await fetch(devportalApi.org(orgID, '/labels'), {
         method: "PUT",
         headers: {
             'Content-Type': 'application/json',

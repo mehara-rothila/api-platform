@@ -51,19 +51,19 @@ func NewWebBrokerAPIHandler(webbrokerAPIService *service.WebBrokerAPIService, sl
 
 // RegisterRoutes registers WebBroker API routes
 func (h *WebBrokerAPIHandler) RegisterRoutes(r *gin.Engine) {
-	v1 := r.Group("/api/v1")
+	v1 := r.Group(constants.APIBasePath)
 	{
 		v1.POST("/webbroker-apis", h.CreateWebBrokerAPI)
 		v1.GET("/webbroker-apis", h.ListWebBrokerAPIs)
 		v1.GET("/webbroker-apis/:apiId", h.GetWebBrokerAPI)
 		v1.PUT("/webbroker-apis/:apiId", h.UpdateWebBrokerAPI)
 		v1.DELETE("/webbroker-apis/:apiId", h.DeleteWebBrokerAPI)
-		v1.POST("/webbroker-apis/:apiId/devportals/publish", h.PublishToDevPortal)
-		v1.POST("/webbroker-apis/:apiId/devportals/unpublish", h.UnpublishFromDevPortal)
+		v1.POST("/webbroker-apis/:apiId/publications", h.PublishToDevPortal)
+		v1.DELETE("/webbroker-apis/:apiId/publications/:devportalId", h.UnpublishFromDevPortal)
 	}
 }
 
-// CreateWebBrokerAPI handles POST /api/v1/webbroker-apis
+// CreateWebBrokerAPI handles POST /api/v0.9/webbroker-apis
 func (h *WebBrokerAPIHandler) CreateWebBrokerAPI(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -89,7 +89,7 @@ func (h *WebBrokerAPIHandler) CreateWebBrokerAPI(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// ListWebBrokerAPIs handles GET /api/v1/webbroker-apis
+// ListWebBrokerAPIs handles GET /api/v0.9/webbroker-apis
 func (h *WebBrokerAPIHandler) ListWebBrokerAPIs(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -124,7 +124,7 @@ func (h *WebBrokerAPIHandler) ListWebBrokerAPIs(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetWebBrokerAPI handles GET /api/v1/webbroker-apis/:apiId
+// GetWebBrokerAPI handles GET /api/v0.9/webbroker-apis/:apiId
 func (h *WebBrokerAPIHandler) GetWebBrokerAPI(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -142,7 +142,7 @@ func (h *WebBrokerAPIHandler) GetWebBrokerAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// UpdateWebBrokerAPI handles PUT /api/v1/webbroker-apis/:apiId
+// UpdateWebBrokerAPI handles PUT /api/v0.9/webbroker-apis/:apiId
 func (h *WebBrokerAPIHandler) UpdateWebBrokerAPI(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -168,7 +168,7 @@ func (h *WebBrokerAPIHandler) UpdateWebBrokerAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// DeleteWebBrokerAPI handles DELETE /api/v1/webbroker-apis/:apiId
+// DeleteWebBrokerAPI handles DELETE /api/v0.9/webbroker-apis/:apiId
 func (h *WebBrokerAPIHandler) DeleteWebBrokerAPI(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -186,7 +186,7 @@ func (h *WebBrokerAPIHandler) DeleteWebBrokerAPI(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// PublishToDevPortal handles POST /api/v1/webbroker-apis/:apiId/devportals/publish
+// PublishToDevPortal publishes a WebBroker API to a DevPortal.
 func (h *WebBrokerAPIHandler) PublishToDevPortal(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -210,7 +210,7 @@ func (h *WebBrokerAPIHandler) PublishToDevPortal(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "WebBroker API published successfully to DevPortal"})
 }
 
-// UnpublishFromDevPortal handles POST /api/v1/webbroker-apis/:apiId/devportals/unpublish
+// UnpublishFromDevPortal unpublishes a WebBroker API from a DevPortal.
 func (h *WebBrokerAPIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	orgID, ok := middleware.GetOrganizationFromContext(c)
 	if !ok {
@@ -219,16 +219,9 @@ func (h *WebBrokerAPIHandler) UnpublishFromDevPortal(c *gin.Context) {
 	}
 
 	apiHandle := c.Param("apiId")
+	devPortalID := c.Param("devportalId")
 
-	var req api.UnpublishFromDevPortalRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", "Invalid request body"))
-		return
-	}
-
-	devPortalUUID := req.DevPortalUuid.String()
-
-	if err := h.webbrokerAPIService.UnpublishFromDevPortal(orgID, apiHandle, devPortalUUID); err != nil {
+	if err := h.webbrokerAPIService.UnpublishFromDevPortal(orgID, apiHandle, devPortalID); err != nil {
 		h.handleServiceError(c, err)
 		return
 	}

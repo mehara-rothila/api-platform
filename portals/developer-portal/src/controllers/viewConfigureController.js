@@ -18,8 +18,14 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../config/logger');
-const adminDao = require('../dao/admin');
-const apiMetadataDao = require('../dao/apiMetadata');
+const orgDao = require('../dao/organizationDao');
+const apiDao = require('../dao/apiDao');
+const viewDao = require('../dao/viewDao');
+const labelDao = require('../dao/labelDao');
+const subscriptionPlanDao = require('../dao/subscriptionPlanDao');
+const whDao = require('../dao/webhookSubscriberDao');
+const { WebhookSubscriberDTO } = require('../dto/webhookSubscriberDto');
+const { VALID_EVENT_TYPES } = require('../services/webhooks/eventPublisher');
 const apiFlowService = require('../services/apiFlowService');
 const { renderGivenTemplate, loadLayoutFromAPI } = require('../utils/util');
 const { getSessionCsrfToken } = require('../middlewares/csrfProtection');
@@ -42,47 +48,79 @@ const loadViewSettingsPage = async (req, res) => {
         showApiWorkflowsNav: config.features?.apiWorkflows?.enabled === true
     };
     try {
-        if (config.mode === constants.DEV_MODE) {
-            templateContent.apiFlows = [];
-            templateContent.orgAPIs = [];
-            templateContent.devportalMode = constants.DEVPORTAL_MODE.DEFAULT;
-            templateContent.llmsConfig = { aiEnabled: true, portalName: '', portalDescription: '' };
-            templateContent.llmsConfigContext = { orgID: '', viewName, csrfToken, baseUrl };
-        } else {
-            const orgName = req.params.orgName;
-            templateContent.loggedOrg = orgName;
-            orgID = await adminDao.getOrgId(orgName);
-            const orgDetails = await adminDao.getOrganization(orgName);
-            templateContent.devportalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
-            templateContent.orgID = orgID;
+        const orgName = req.params.orgName;
+        templateContent.loggedOrg = orgName;
+        orgID = await orgDao.getId(orgName);
+        const orgDetails = await orgDao.get(orgName);
+        templateContent.devportalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
+        templateContent.orgID = orgID;
 
-            const viewId = await apiMetadataDao.getViewID(orgID, viewName);
-            const apiFlows = await apiFlowService.getAllAPIFlowsFromDB(orgID, viewId);
-            templateContent.apiFlows = apiFlows;
+        const viewId = await viewDao.getId(orgID, viewName);
+        const apiFlows = await apiFlowService.getAllAPIFlowsFromDB(orgID, viewId);
+        templateContent.apiFlows = apiFlows;
 
-            const allAPIs = await apiMetadataDao.getAPIMetadataByCondition({ ORG_ID: orgID, STATUS: constants.API_STATUS.PUBLISHED });
-            templateContent.orgAPIs = allAPIs.map(api => ({
-                apiId: api.API_ID,
-                apiName: api.API_NAME,
-                apiHandle: api.API_HANDLE,
-                apiDescription: api.API_DESCRIPTION,
-                apiType: api.API_TYPE,
-                productionUrl: api.PRODUCTION_URL,
-                agentVisibility: api.AGENT_VISIBILITY
-            }));
+        const allAPIs = await apiDao.getByCondition({ ORG_ID: orgID });
+        templateContent.orgAPIs = allAPIs.map(api => ({
+            apiId: api.API_ID,
+            apiName: api.API_NAME,
+            apiHandle: api.API_HANDLE,
+            apiDescription: api.API_DESCRIPTION,
+            apiType: api.API_TYPE,
+            apiVersion: api.API_VERSION,
+            apiStatus: api.STATUS,
+            productionUrl: api.PRODUCTION_URL,
+            sandboxUrl: api.SANDBOX_URL,
+            tags: api.TAGS || '',
+            agentVisibility: api.AGENT_VISIBILITY,
+            subscriptionPlans: (api.SubscriptionPlans || []).map(p => p.PLAN_NAME),
+        }));
 
-            const configAsset = await adminDao.getOrgContent({
-                orgId: orgID, fileType: constants.FILE_TYPE.LLMS_CONFIG, viewName, fileName: constants.FILE_NAME.LLMS_CONFIG
-            });
-            let llmsConfig = { aiEnabled: true, portalName: '', portalDescription: '' };
-            if (configAsset) {
-                try { llmsConfig = { ...llmsConfig, ...JSON.parse(configAsset.FILE_CONTENT.toString('utf8')) }; } catch (e) { /* ignore */ }
-            }
-            templateContent.llmsConfig = llmsConfig;
-            templateContent.llmsConfigContext = { orgID, viewName, csrfToken, baseUrl };
-
-            templateContent.profile = req.user;
+        let orgLabels = [];
+        try {
+            const labelsRaw = await labelDao.list(orgID);
+            orgLabels = labelsRaw.map(l => ({ labelId: l.LABEL_ID, name: l.NAME, displayName: l.DISPLAY_NAME }));
+        } catch (err) {
+            logger.warn('Failed to load labels for settings page', { error: err.message });
         }
+        templateContent.orgLabels = orgLabels;
+
+        let orgPlans = [];
+        try {
+            const plansRaw = await subscriptionPlanDao.list(orgID);
+            orgPlans = plansRaw.map(p => ({
+                planId: p.PLAN_ID,
+                planName: p.PLAN_NAME,
+                displayName: p.DISPLAY_NAME,
+                description: p.DESCRIPTION || '',
+                requestCount: p.REQUEST_COUNT,
+                refId: p.REF_ID || '',
+            }));
+        } catch (err) {
+            logger.warn('Failed to load subscription plans for settings page', { error: err.message });
+        }
+        templateContent.orgPlans = orgPlans;
+
+        let webhookSubscribers = [];
+        try {
+            const webhookSubscriberRecords = await whDao.list(orgID);
+            webhookSubscribers = webhookSubscriberRecords.map(r => new WebhookSubscriberDTO(r));
+        } catch (err) {
+            logger.warn('Failed to load webhook subscribers for settings page', { error: err.message });
+        }
+        templateContent.webhookSubscribers = webhookSubscribers;
+        templateContent.webhookEventTypes = [...VALID_EVENT_TYPES];
+
+        const configAsset = await orgDao.getContent({
+            orgId: orgID, fileType: constants.FILE_TYPE.LLMS_CONFIG, viewName, fileName: constants.FILE_NAME.LLMS_CONFIG
+        });
+        let llmsConfig = { aiEnabled: true, portalName: '', portalDescription: '' };
+        if (configAsset) {
+            try { llmsConfig = { ...llmsConfig, ...JSON.parse(configAsset.FILE_CONTENT.toString('utf8')) }; } catch (e) { /* ignore */ }
+        }
+        templateContent.llmsConfig = llmsConfig;
+        templateContent.llmsConfigContext = { orgID, viewName, csrfToken, baseUrl };
+
+        templateContent.profile = req.user;
         const templateResponse = fs.readFileSync(completeTemplatePath, constants.CHARSET_UTF8);
         const dbLayout = orgID ? await loadLayoutFromAPI(orgID, viewName) : '';
         let html;
@@ -105,8 +143,8 @@ const loadViewSettingsPage = async (req, res) => {
 const getLlmsConfig = async (req, res) => {
     const { orgName, viewName } = req.params;
     try {
-        const orgID = await adminDao.getOrgId(orgName);
-        const asset = await adminDao.getOrgContent({
+        const orgID = await orgDao.getId(orgName);
+        const asset = await orgDao.getContent({
             orgId: orgID, fileType: constants.FILE_TYPE.LLMS_CONFIG, viewName, fileName: constants.FILE_NAME.LLMS_CONFIG
         });
         if (!asset) {
@@ -130,19 +168,19 @@ const saveLlmsConfig = async (req, res) => {
         .trim().replace(/[<>"'&]/g, '').slice(0, 1000);
 
     try {
-        const orgID = await adminDao.getOrgId(orgName);
+        const orgID = await orgDao.getId(orgName);
         const content = Buffer.from(JSON.stringify({ aiEnabled, portalName, portalDescription }));
         const orgData = {
             orgId: orgID, fileType: constants.FILE_TYPE.LLMS_CONFIG, viewName,
             fileName: constants.FILE_NAME.LLMS_CONFIG, fileContent: content, filePath: constants.FILE_TYPE.LLMS_CONFIG
         };
-        const existing = await adminDao.getOrgContent({
+        const existing = await orgDao.getContent({
             orgId: orgID, fileType: constants.FILE_TYPE.LLMS_CONFIG, viewName, fileName: constants.FILE_NAME.LLMS_CONFIG
         });
         if (existing) {
-            await adminDao.updateOrgContent(orgData);
+            await orgDao.updateContent(orgData);
         } else {
-            await adminDao.createOrgContent(orgData);
+            await orgDao.createContent(orgData);
         }
         res.json({ message: 'Saved successfully' });
     } catch (err) {

@@ -44,7 +44,7 @@ func NewDeploymentHandler(deploymentService *service.DeploymentService, slogger 
 	}
 }
 
-// DeployAPI handles POST /api/v1/apis/:apiId/deploy
+// DeployAPI handles POST /api/v0.9/rest-apis/:apiId/deployments
 // Creates a new immutable deployment artifact and deploys it to a gateway
 func (h *DeploymentHandler) DeployAPI(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -130,8 +130,7 @@ func (h *DeploymentHandler) DeployAPI(c *gin.Context) {
 	c.JSON(http.StatusCreated, deployment)
 }
 
-// UndeployDeployment handles POST /api/v1/apis/:apiId/deployments/undeploy
-// Undeploys an active deployment by changing its status to UNDEPLOYED
+// UndeployDeployment handles POST /api/v0.9/rest-apis/:apiId/deployments/:deploymentId/undeploy
 func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -141,14 +140,8 @@ func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 	}
 
 	apiId := c.Param("apiId")
-	var params api.UndeployDeploymentParams
-	if err := c.ShouldBindQuery(&params); err != nil {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
-		return
-	}
-
-	deploymentId := params.DeploymentId
-	gatewayId := params.GatewayId
+	deploymentId := c.Param("deploymentId")
+	gatewayId := c.Query("gatewayId")
 	if deploymentId == "" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"deploymentId is required"))
@@ -205,8 +198,7 @@ func (h *DeploymentHandler) UndeployDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, deployment)
 }
 
-// RestoreDeployment handles POST /api/v1/apis/:apiId/deployments/restore
-// Restores a previous deployment (ARCHIVED or UNDEPLOYED)
+// RestoreDeployment handles POST /api/v0.9/rest-apis/:apiId/deployments/:deploymentId/restore
 func (h *DeploymentHandler) RestoreDeployment(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
 	if !exists {
@@ -216,14 +208,8 @@ func (h *DeploymentHandler) RestoreDeployment(c *gin.Context) {
 	}
 
 	apiId := c.Param("apiId")
-	var params api.RestoreDeploymentParams
-	if err := c.ShouldBindQuery(&params); err != nil {
-		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request", err.Error()))
-		return
-	}
-
-	deploymentId := params.DeploymentId
-	gatewayId := params.GatewayId
+	deploymentId := c.Param("deploymentId")
+	gatewayId := c.Query("gatewayId")
 	if deploymentId == "00000000-0000-0000-0000-000000000000" || gatewayId == "00000000-0000-0000-0000-000000000000" {
 		c.JSON(http.StatusBadRequest, utils.NewErrorResponse(400, "Bad Request",
 			"deploymentId/gatewayId cannot be zero-value UUID"))
@@ -270,7 +256,7 @@ func (h *DeploymentHandler) RestoreDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, deployment)
 }
 
-// DeleteDeployment handles DELETE /api/v1/apis/:apiId/deployments/:deploymentId
+// DeleteDeployment handles DELETE /api/v0.9/rest-apis/:apiId/deployments/:deploymentId
 // Permanently deletes an undeployed deployment artifact
 func (h *DeploymentHandler) DeleteDeployment(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -319,7 +305,7 @@ func (h *DeploymentHandler) DeleteDeployment(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-// GetDeployment handles GET /api/v1/apis/:apiId/deployments/:deploymentId
+// GetDeployment handles GET /api/v0.9/rest-apis/:apiId/deployments/:deploymentId
 // Retrieves metadata for a specific deployment artifact
 func (h *DeploymentHandler) GetDeployment(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -364,7 +350,7 @@ func (h *DeploymentHandler) GetDeployment(c *gin.Context) {
 	c.JSON(http.StatusOK, deployment)
 }
 
-// GetDeployments handles GET /api/v1/apis/:apiId/deployments
+// GetDeployments handles GET /api/v0.9/rest-apis/:apiId/deployments
 // Retrieves all deployment records for an API with optional filters
 func (h *DeploymentHandler) GetDeployments(c *gin.Context) {
 	orgId, exists := middleware.GetOrganizationFromContext(c)
@@ -419,11 +405,11 @@ func (h *DeploymentHandler) GetDeployments(c *gin.Context) {
 // RegisterRoutes registers all deployment-related routes
 func (h *DeploymentHandler) RegisterRoutes(r *gin.Engine) {
 	h.slogger.Debug("Registering deployment routes")
-	apiGroup := r.Group("/api/v1/rest-apis/:apiId")
+	apiGroup := r.Group(constants.APIBasePath + "/rest-apis/:apiId")
 	{
 		apiGroup.POST("/deployments", h.DeployAPI)
-		apiGroup.POST("/deployments/undeploy", h.UndeployDeployment)
-		apiGroup.POST("/deployments/restore", h.RestoreDeployment)
+		apiGroup.POST("/deployments/:deploymentId/undeploy", h.UndeployDeployment)
+		apiGroup.POST("/deployments/:deploymentId/restore", h.RestoreDeployment)
 		apiGroup.GET("/deployments", h.GetDeployments)
 		apiGroup.GET("/deployments/:deploymentId", h.GetDeployment)
 		apiGroup.DELETE("/deployments/:deploymentId", h.DeleteDeployment)
