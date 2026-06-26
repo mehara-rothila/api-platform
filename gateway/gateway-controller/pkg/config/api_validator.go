@@ -242,6 +242,20 @@ func (v *APIValidator) validateUpstreamRef(label string, ref *string, upstreamDe
 
 	refName := strings.TrimSpace(*ref)
 
+	if len(refName) > 100 {
+		return []ValidationError{{
+			Field:   "spec.upstream." + label + ".ref",
+			Message: "Upstream ref must not exceed 100 characters",
+		}}
+	}
+
+	if !v.upstreamRefRegex.MatchString(refName) {
+		return []ValidationError{{
+			Field:   "spec.upstream." + label + ".ref",
+			Message: "Upstream ref must match pattern ^[a-zA-Z0-9\\-_]+$",
+		}}
+	}
+
 	// Check if upstream definitions are provided
 	if upstreamDefinitions == nil || len(*upstreamDefinitions) == 0 {
 		errors = append(errors, ValidationError{
@@ -454,7 +468,31 @@ func (v *APIValidator) validateRestData(spec *api.APIConfigData) []ValidationErr
 	// Validate operations
 	errors = append(errors, v.validateOperations(spec.Operations, spec.UpstreamDefinitions)...)
 
+	// Validate that a configured sandbox vhost has a sandbox upstream to route to
+	errors = append(errors, v.validateSandboxVhostUsage(spec)...)
+
 	return errors
+}
+
+// validateSandboxVhostUsage rejects a configured sandbox vhost that has no sandbox
+// upstream to serve it: neither an API-level upstream.sandbox nor any operation-level
+// sandbox ref.
+func (v *APIValidator) validateSandboxVhostUsage(spec *api.APIConfigData) []ValidationError {
+	if spec.Vhosts == nil || spec.Vhosts.Sandbox == nil || strings.TrimSpace(*spec.Vhosts.Sandbox) == "" {
+		return nil
+	}
+	if spec.Upstream.Sandbox != nil {
+		return nil
+	}
+	for _, op := range spec.Operations {
+		if op.Upstream != nil && op.Upstream.Sandbox != nil && strings.TrimSpace(op.Upstream.Sandbox.Ref) != "" {
+			return nil
+		}
+	}
+	return []ValidationError{{
+		Field:   "spec.vhosts.sandbox",
+		Message: "Sandbox vhost requires a sandbox upstream; set spec.upstream.sandbox or an operation-level upstream.sandbox ref",
+	}}
 }
 
 // validateAsyncData validates the data section of the configuration for http/rest kind

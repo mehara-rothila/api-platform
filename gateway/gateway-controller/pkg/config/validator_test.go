@@ -1110,22 +1110,30 @@ func TestValidateOperationUpstream_EmptyWrapper(t *testing.T) {
 	assert.True(t, found, "expected anyOf error at wrapper level, got %+v", errors)
 }
 
-func TestValidateOperationUpstream_EmptyLeaf(t *testing.T) {
+// TestValidateOperationUpstream_SandboxUnknownRef asserts the sandbox sub-field is
+// validated too (the existence check runs for sandbox), with a sandbox-scoped field path.
+func TestValidateOperationUpstream_SandboxUnknownRef(t *testing.T) {
 	validator := NewAPIValidator()
+	definitions := &[]api.UpstreamDefinition{
+		{Name: "user-svc-cluster", Upstreams: []struct {
+			Url    string `json:"url" yaml:"url"`
+			Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+		}{{Url: "http://user-svc:8080"}}},
+	}
 	up := &api.RestAPIOperationUpstream{
-		Main: &api.RestAPIOperationUpstreamTarget{Ref: ""}, // empty ref
+		Sandbox: &api.RestAPIOperationUpstreamTarget{Ref: "missing-cluster"},
 	}
 
-	errors := validator.validateOperationUpstream(0, up, nil)
-	require.NotEmpty(t, errors, "empty ref must be rejected")
+	errors := validator.validateOperationUpstream(0, up, definitions)
+	require.NotEmpty(t, errors)
 	found := false
 	for _, e := range errors {
-		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.sandbox.ref") {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "expected rejection scoped to main.ref, got %+v", errors)
+	assert.True(t, found, "expected unknown-ref error scoped to sandbox.ref, got %+v", errors)
 }
 
 // TestValidateOperationUpstream_RefPatternRejected asserts that a ref containing
@@ -1199,4 +1207,156 @@ func TestValidateOperationUpstream_RefMaxLength(t *testing.T) {
 	}
 	errors = validator.validateOperationUpstream(0, up, definitions)
 	assert.Empty(t, errors, "ref of exactly 100 chars must pass")
+}
+
+// TestValidate_PerOpRef_FullFlow exercises the complete entry path
+// Validate -> validateRestData -> validateOperations -> validateOperationUpstream,
+// confirming a per-op ref error surfaces from the public Validate API with the
+// operation-scoped field path (not just the helper in isolation).
+func TestValidate_PerOpRef_FullFlow(t *testing.T) {
+	validator := NewAPIValidator()
+	config := &api.RestAPI{
+		ApiVersion: api.RestAPIApiVersionGatewayApiPlatformWso2Comv1alpha1,
+		Kind:       api.RestAPIKindRestApi,
+		Metadata:   api.Metadata{Name: "per-op-ref-api-v1.0"},
+		Spec: api.APIConfigData{
+			DisplayName: "PerOpRefAPI",
+			Version:     "v1.0",
+			Context:     "/per-op",
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{
+				Main: api.Upstream{Url: func() *string { s := "http://example.com"; return &s }()},
+			},
+			Operations: []api.Operation{
+				{
+					Method: "GET",
+					Path:   "/users",
+					Upstream: &api.RestAPIOperationUpstream{
+						Main: &api.RestAPIOperationUpstreamTarget{Ref: "missing-cluster"},
+					},
+				},
+			},
+		},
+	}
+
+	errors := validator.Validate(config)
+	require.NotEmpty(t, errors)
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") &&
+			strings.Contains(e.Message, "not found") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected per-op ref error via full Validate, got %+v", errors)
+}
+
+func TestValidate_SandboxVhostUsage(t *testing.T) {
+	validator := NewAPIValidator()
+	mainURL := "http://sample-backend:9080"
+	sandboxVhost := "sandbox.local"
+
+	base := func() *api.RestAPI {
+		return &api.RestAPI{
+			ApiVersion: api.RestAPIApiVersionGatewayApiPlatformWso2Comv1alpha1,
+			Kind:       api.RestAPIKindRestApi,
+			Metadata:   api.Metadata{Name: "sb-vhost-v1.0"},
+			Spec: api.APIConfigData{
+				DisplayName: "SBVhost",
+				Version:     "v1.0",
+				Context:     "/sb",
+				Vhosts: &struct {
+					Main    string  `json:"main" yaml:"main"`
+					Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+				}{Main: "main.local", Sandbox: &sandboxVhost},
+				Upstream: struct {
+					Main    api.Upstream  `json:"main" yaml:"main"`
+					Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+				}{Main: api.Upstream{Url: &mainURL}},
+				Operations: []api.Operation{{Method: "GET", Path: "/items"}},
+			},
+		}
+	}
+
+	hasSandboxVhostErr := func(errs []ValidationError) bool {
+		for _, e := range errs {
+			if e.Field == "spec.vhosts.sandbox" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("sandbox vhost with no sandbox upstream is rejected", func(t *testing.T) {
+		errs := validator.Validate(base())
+		assert.True(t, hasSandboxVhostErr(errs), "sandbox vhost without any sandbox upstream should be rejected, got %+v", errs)
+	})
+
+	t.Run("sandbox vhost with an API-level sandbox upstream is allowed", func(t *testing.T) {
+		config := base()
+		sbURL := "http://sandbox-backend:9080"
+		config.Spec.Upstream.Sandbox = &api.Upstream{Url: &sbURL}
+		assert.False(t, hasSandboxVhostErr(validator.Validate(config)), "API-level sandbox upstream should satisfy the sandbox vhost")
+	})
+
+	t.Run("sandbox vhost with an operation-level sandbox ref is allowed", func(t *testing.T) {
+		config := base()
+		config.Spec.Operations = []api.Operation{
+			{Method: "GET", Path: "/items", Upstream: &api.RestAPIOperationUpstream{
+				Sandbox: &api.RestAPIOperationUpstreamTarget{Ref: "sandbox-svc"},
+			}},
+		}
+		assert.False(t, hasSandboxVhostErr(validator.Validate(config)), "an operation-level sandbox ref should satisfy the sandbox vhost")
+	})
+
+	t.Run("no sandbox vhost is allowed", func(t *testing.T) {
+		config := base()
+		config.Spec.Vhosts.Sandbox = nil
+		assert.False(t, hasSandboxVhostErr(validator.Validate(config)), "an API without a sandbox vhost should not be flagged")
+	})
+}
+
+func TestValidate_APILevelRefPatternAndLength(t *testing.T) {
+	validator := NewAPIValidator()
+
+	base := func(ref string) *api.RestAPI {
+		r := ref
+		return &api.RestAPI{
+			ApiVersion: api.RestAPIApiVersionGatewayApiPlatformWso2Comv1alpha1,
+			Kind:       api.RestAPIKindRestApi,
+			Metadata:   api.Metadata{Name: "api-ref-v1.0"},
+			Spec: api.APIConfigData{
+				DisplayName: "APIRef",
+				Version:     "v1.0",
+				Context:     "/api-ref",
+				Upstream: struct {
+					Main    api.Upstream  `json:"main" yaml:"main"`
+					Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+				}{Main: api.Upstream{Ref: &r}},
+				Operations: []api.Operation{{Method: "GET", Path: "/x"}},
+			},
+		}
+	}
+
+	hasRefErr := func(errs []ValidationError, msgSub string) bool {
+		for _, e := range errs {
+			if e.Field == "spec.upstream.main.ref" && strings.Contains(e.Message, msgSub) {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("bad pattern is rejected with a pattern error", func(t *testing.T) {
+		errs := validator.Validate(base("bad/ref"))
+		assert.True(t, hasRefErr(errs, "must match pattern"), "API-level ref with bad characters should give a pattern error, got %+v", errs)
+	})
+
+	t.Run("over-length ref is rejected with a length error", func(t *testing.T) {
+		errs := validator.Validate(base(strings.Repeat("a", 101)))
+		assert.True(t, hasRefErr(errs, "must not exceed 100 characters"), "API-level ref over 100 chars should give a length error, got %+v", errs)
+	})
 }
