@@ -152,38 +152,3 @@ func TestParseConnectTimeout_Negative(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be positive")
 }
-
-func TestResolveConnectTimeout_NilDef(t *testing.T) {
-	d, err := ResolveConnectTimeout(nil)
-	require.NoError(t, err)
-	assert.Nil(t, d)
-}
-
-func TestResolveConnectTimeout_NoTimeoutBlock(t *testing.T) {
-	def := &api.UpstreamDefinition{Name: "x"}
-	d, err := ResolveConnectTimeout(def)
-	require.NoError(t, err)
-	assert.Nil(t, d)
-}
-
-func TestResolveConnectTimeout_ValidConnect(t *testing.T) {
-	v := "3s"
-	def := &api.UpstreamDefinition{
-		Name:    "x",
-		Timeout: &api.UpstreamTimeout{Connect: &v},
-	}
-	d, err := ResolveConnectTimeout(def)
-	require.NoError(t, err)
-	require.NotNil(t, d)
-	assert.Equal(t, 3*time.Second, *d)
-}
-
-func TestResolveConnectTimeout_InvalidConnect(t *testing.T) {
-	v := "-2s"
-	def := &api.UpstreamDefinition{
-		Name:    "x",
-		Timeout: &api.UpstreamTimeout{Connect: &v},
-	}
-	_, err := ResolveConnectTimeout(def)
-	require.Error(t, err)
-}

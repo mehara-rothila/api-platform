@@ -3090,7 +3090,7 @@ func resolveUpstreamDefinition(ref string, definitions *[]api.UpstreamDefinition
 }
 
 // parseTimeout parses a duration string and returns a time.Duration. Thin wrapper
-// over upstreamref.ParseConnectTimeout so xDS and RDC share one source of truth.
+// over upstreamref.ParseConnectTimeout so xDS timeout parsing uses the shared parser.
 func parseTimeout(timeoutStr *string) (*time.Duration, error) {
 	return upstreamref.ParseConnectTimeout(timeoutStr)
 }

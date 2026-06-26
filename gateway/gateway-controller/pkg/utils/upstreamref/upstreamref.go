@@ -70,13 +70,3 @@ func ParseConnectTimeout(timeoutStr *string) (*time.Duration, error) {
 	}
 	return &d, nil
 }
-
-// ResolveConnectTimeout extracts and parses the Connect timeout from an
-// UpstreamDefinition. Returns (nil, nil) if the definition has no timeout
-// configured, or an error if the configured value is invalid.
-func ResolveConnectTimeout(def *api.UpstreamDefinition) (*time.Duration, error) {
-	if def == nil || def.Timeout == nil {
-		return nil, nil
-	}
-	return ParseConnectTimeout(def.Timeout.Connect)
-}
