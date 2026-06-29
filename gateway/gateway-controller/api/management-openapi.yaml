@@ -4322,9 +4322,7 @@ components:
       type: object
       additionalProperties: false
       description: Per-operation upstream override. Each sub-field must reference a named entry in spec.upstreamDefinitions. Missing sub-fields fall back to API-level upstream. At least one of main or sandbox must be set.
-      anyOf:
-        - required: [main]
-        - required: [sandbox]
+      minProperties: 1
       properties:
         main:
           $ref: "#/components/schemas/RestAPIOperationUpstreamTarget"

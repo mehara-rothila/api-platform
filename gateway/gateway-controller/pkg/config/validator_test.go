@@ -1198,7 +1198,7 @@ func TestValidateOperationUpstream_EmptyWrapper(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, found, "expected anyOf error at wrapper level, got %+v", errors)
+	assert.True(t, found, "expected 'at least one' error at wrapper level, got %+v", errors)
 }
 
 // TestValidateOperationUpstream_SandboxUnknownRef asserts the sandbox sub-field is
