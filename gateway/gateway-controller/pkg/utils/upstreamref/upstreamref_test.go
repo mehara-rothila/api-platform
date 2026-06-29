@@ -125,6 +125,20 @@ func TestParseConnectTimeout_ValidMilliseconds(t *testing.T) {
 	assert.Equal(t, 500*time.Millisecond, *d)
 }
 
+func TestParseConnectTimeout_ValidMinutesAndHours(t *testing.T) {
+	m := "2m"
+	d, err := ParseConnectTimeout(&m)
+	require.NoError(t, err)
+	require.NotNil(t, d)
+	assert.Equal(t, 2*time.Minute, *d)
+
+	h := "1h"
+	d, err = ParseConnectTimeout(&h)
+	require.NoError(t, err)
+	require.NotNil(t, d)
+	assert.Equal(t, 1*time.Hour, *d)
+}
+
 func TestParseConnectTimeout_Malformed(t *testing.T) {
 	v := "abc"
 	_, err := ParseConnectTimeout(&v)

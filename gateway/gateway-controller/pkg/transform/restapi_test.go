@@ -420,6 +420,12 @@ func TestRestAPITransformer_PerOpSandboxOverridesSandboxVhost(t *testing.T) {
 	require.NotNil(t, sandboxRoute)
 	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "upstream_"),
 		"sandbox vhost should use definition cluster, got %q", sandboxRoute.Upstream.ClusterKey)
+	// Per-op sandbox is dynamic too: cluster_header ON with the definition cluster as
+	// the default, mirroring the per-op main behavior so policies can still steer it.
+	assert.True(t, sandboxRoute.Upstream.UseClusterHeader,
+		"per-op sandbox route should use cluster_header so policies can override")
+	assert.Equal(t, sandboxRoute.Upstream.ClusterKey, sandboxRoute.Upstream.DefaultCluster,
+		"per-op sandbox DefaultCluster must be the definition cluster key")
 }
 
 // TestRestAPITransformer_PerOpBothOverrideBothVhosts asserts that both vhosts get distinct
