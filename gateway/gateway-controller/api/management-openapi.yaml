@@ -4317,7 +4317,6 @@ components:
             $ref: "#/components/schemas/Policy"
         upstream:
           $ref: "#/components/schemas/RestAPIOperationUpstream"
-          description: Per-operation upstream override with main and sandbox sub-fields.
 
     RestAPIOperationUpstream:
       type: object
