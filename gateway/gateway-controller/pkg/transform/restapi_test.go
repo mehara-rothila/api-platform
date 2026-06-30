@@ -152,7 +152,7 @@ func TestRestAPITransformer_OperationLevelEmptyVersionResolvesToLatest(t *testin
 // TestRestAPITransformer_UnknownPolicySkipped verifies that a policy not present in
 // the definitions is silently excluded from the policy chain without causing an error.
 func TestRestAPITransformer_UnknownPolicySkipped(t *testing.T) {
-	defs := map[string]models.PolicyDefinition{} // empty - policy won't resolve
+	defs := map[string]models.PolicyDefinition{} // empty — policy won't resolve
 
 	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, defs)
 	cfg := makeRestAPIStoredConfig(
