@@ -404,9 +404,9 @@ func (v *APIValidator) validateUpstreamDefinitions(definitions *[]api.UpstreamDe
 
 		// Timeout validation is limited to connect timeout; request and idle
 		// timeouts are no longer supported at the upstream definition level.
-		// Parsed inline rather than via upstreamref.ParseConnectTimeout so the two
-		// distinct, tested messages below (invalid-format vs non-positive) are kept;
-		// the shared helper collapses both into a single message.
+		// Parsed inline rather than via upstreamref.ParseConnectTimeout: the validator
+		// additionally enforces the spec's single-unit ms|s|m|h pattern (the helper
+		// accepts any Go duration, since it runs on already-validated config).
 		if def.Timeout != nil && def.Timeout.Connect != nil {
 			timeoutStr := strings.TrimSpace(*def.Timeout.Connect)
 			if timeoutStr != "" {
