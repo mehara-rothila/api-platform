@@ -948,4 +948,3 @@ func TestRestAPITransformer_APILevelPolicyPrecedesOperationLevelInChain(t *testi
 	assert.Equal(t, "op-pol", chain.Policies[1].Name,
 		"operation-level policy must come after the API-level policy so it wins as the last write in the kernel")
 }
-
