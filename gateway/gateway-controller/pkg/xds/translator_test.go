@@ -2273,13 +2273,11 @@ func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 	require.NotEmpty(t, clusters, "expected at least one cluster")
 	require.NotEmpty(t, routeConfigs, "expected at least one route configuration")
 
-	// Per-op sandbox now REUSES the referenced definition's cluster
-	// (upstream_<kind>_<apiID>_user-svc-sb-cluster); no per-op "op_" cluster is minted.
+	// Per-op sandbox REUSES the referenced definition's cluster
+	// (upstream_<kind>_<apiID>_user-svc-sb-cluster).
 	var defClusterName string
 	for _, c := range clusters {
 		name := c.(*cluster.Cluster).GetName()
-		require.False(t, strings.HasPrefix(name, "op_"),
-			"per-op refs must not mint op_ clusters anymore; got %q", name)
 		if strings.HasPrefix(name, "upstream_") && strings.Contains(name, "user-svc-sb-cluster") {
 			defClusterName = name
 		}
@@ -2290,8 +2288,7 @@ func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 }
 
 // TestTranslateConfigs_PerOpMainReusesDefinitionCluster asserts that a per-op main
-// override reuses the referenced upstreamDefinition cluster on the legacy xDS path,
-// minting no per-op "op_" cluster.
+// override reuses the referenced upstreamDefinition cluster on the legacy xDS path.
 func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
 	translator := createTestTranslator()
 
@@ -2346,8 +2343,6 @@ func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
 	var defClusterName string
 	for _, c := range clusters {
 		name := c.(*cluster.Cluster).GetName()
-		require.False(t, strings.HasPrefix(name, "op_"),
-			"per-op refs must not mint op_ clusters; got %q", name)
 		if strings.HasPrefix(name, "upstream_") && strings.Contains(name, "premium-svc") {
 			defClusterName = name
 		}

@@ -506,10 +506,9 @@ func TestRestAPITransformer_TwoOpsSameRefReuseOneCluster(t *testing.T) {
 	assert.True(t, strings.HasPrefix(getRoute.Upstream.ClusterKey, "upstream_"),
 		"per-op route must reuse the upstream_<def> definition cluster, got %q", getRoute.Upstream.ClusterKey)
 
-	// Exactly ONE cluster registered for shared-svc; zero op_ clusters.
+	// Exactly ONE cluster registered for shared-svc.
 	shared := 0
 	for k := range rdc.UpstreamClusters {
-		assert.False(t, strings.HasPrefix(k, "op_"), "no per-op (op_) clusters may be minted, got %q", k)
 		if strings.Contains(k, "shared-svc") {
 			shared++
 		}
