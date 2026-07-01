@@ -379,8 +379,8 @@ func TestRestAPITransformer_PerOpMainOverridesMainVhost(t *testing.T) {
 
 	mainRoute := rdc.Routes["GET|/test/users|main.local"]
 	require.NotNil(t, mainRoute)
-	assert.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "upstream_"),
-		"main vhost should use definition cluster, got %q", mainRoute.Upstream.ClusterKey)
+	assert.Equal(t, clusterkey.DefinitionName("RestApi", cfg.UUID, "user-svc-cluster"), mainRoute.Upstream.ClusterKey,
+		"main vhost should use the referenced definition cluster")
 	// Per-op main is dynamic: cluster_header ON with the definition cluster as the
 	// default, so a dynamic-endpoint policy can still steer it while a no-policy
 	// request falls back to the per-op ref.
@@ -418,8 +418,8 @@ func TestRestAPITransformer_PerOpSandboxOverridesSandboxVhost(t *testing.T) {
 
 	sandboxRoute := rdc.Routes["GET|/test/users|sandbox.local"]
 	require.NotNil(t, sandboxRoute)
-	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "upstream_"),
-		"sandbox vhost should use definition cluster, got %q", sandboxRoute.Upstream.ClusterKey)
+	assert.Equal(t, clusterkey.DefinitionName("RestApi", cfg.UUID, "user-svc-test-cluster"), sandboxRoute.Upstream.ClusterKey,
+		"sandbox vhost should use the referenced definition cluster")
 }
 
 // TestRestAPITransformer_PerOpBothOverrideBothVhosts asserts that both vhosts get distinct
@@ -444,8 +444,10 @@ func TestRestAPITransformer_PerOpBothOverrideBothVhosts(t *testing.T) {
 	require.NotNil(t, mainRoute)
 	require.NotNil(t, sandboxRoute)
 
-	assert.True(t, strings.HasPrefix(mainRoute.Upstream.ClusterKey, "upstream_"))
-	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "upstream_"))
+	assert.Equal(t, clusterkey.DefinitionName("RestApi", cfg.UUID, "user-svc-cluster"), mainRoute.Upstream.ClusterKey,
+		"main vhost should use its referenced definition cluster")
+	assert.Equal(t, clusterkey.DefinitionName("RestApi", cfg.UUID, "user-svc-test-cluster"), sandboxRoute.Upstream.ClusterKey,
+		"sandbox vhost should use its referenced definition cluster")
 	assert.NotEqual(t, mainRoute.Upstream.ClusterKey, sandboxRoute.Upstream.ClusterKey,
 		"main and sandbox per-op vhosts must produce distinct cluster keys (definition names differ)")
 }
@@ -916,5 +918,34 @@ func TestRestAPITransformer_ClusterNameUsesSharedHelper(t *testing.T) {
 		rdc.Routes["GET|/test/users|main.local"].Upstream.ClusterKey)
 	assert.Equal(t, clusterkey.APILevelName("sandbox", cfg.UUID),
 		rdc.Routes["GET|/test/users|sandbox.local"].Upstream.ClusterKey)
+}
+
+// TestRestAPITransformer_APILevelPolicyPrecedesOperationLevelInChain pins that
+// buildPolicyChain places API-level policies before operation-level ones, so an
+// operation-level policy is the last write and wins over an API-level one in the kernel.
+func TestRestAPITransformer_APILevelPolicyPrecedesOperationLevelInChain(t *testing.T) {
+	defs := map[string]models.PolicyDefinition{
+		"api-pol|v1.0.0": {Name: "api-pol", Version: "v1.0.0"},
+		"op-pol|v1.0.0":  {Name: "op-pol", Version: "v1.0.0"},
+	}
+
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, defs)
+	cfg := makeRestAPIStoredConfig(
+		[]api.Policy{{Name: "api-pol", Version: ""}},
+		[]api.Policy{{Name: "op-pol", Version: ""}},
+	)
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, rdc)
+
+	routeKey := "GET|/test/hello|main.local"
+	chain, ok := rdc.PolicyChains[routeKey]
+	require.True(t, ok)
+	require.Len(t, chain.Policies, 2)
+	assert.Equal(t, "api-pol", chain.Policies[0].Name,
+		"API-level policy must come first in the chain")
+	assert.Equal(t, "op-pol", chain.Policies[1].Name,
+		"operation-level policy must come after the API-level policy so it wins as the last write in the kernel")
 }
 

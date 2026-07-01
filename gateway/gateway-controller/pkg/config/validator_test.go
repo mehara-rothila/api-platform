@@ -1145,6 +1145,8 @@ func TestValidateOperationUpstream_EmptyRef(t *testing.T) {
 	for _, e := range errors {
 		if strings.Contains(e.Field, "spec.operations[2].upstream.main") {
 			found = true
+			assert.Contains(t, e.Message, "Upstream ref is required",
+				"empty ref should be rejected with the required-ref reason")
 			break
 		}
 	}
@@ -1176,6 +1178,8 @@ func TestValidateOperationUpstream_UnknownRef(t *testing.T) {
 	for _, e := range errors {
 		if strings.Contains(e.Field, "spec.operations[0].upstream.main.ref") {
 			found = true
+			assert.Contains(t, e.Message, "not found in upstreamDefinitions",
+				"unknown ref should be rejected with the not-found reason")
 			break
 		}
 	}
@@ -1221,6 +1225,8 @@ func TestValidateOperationUpstream_SandboxUnknownRef(t *testing.T) {
 	for _, e := range errors {
 		if strings.Contains(e.Field, "spec.operations[0].upstream.sandbox.ref") {
 			found = true
+			assert.Contains(t, e.Message, "not found in upstreamDefinitions",
+				"unknown sandbox ref should be rejected with the not-found reason")
 			break
 		}
 	}

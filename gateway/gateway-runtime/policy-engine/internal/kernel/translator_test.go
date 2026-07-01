@@ -984,3 +984,43 @@ func TestTranslateRequestHeaderActionsWithBodyMerge_DynamicEndpoint(t *testing.T
 		assert.NotContains(t, extProc.Fields, "request_transformation.target_path")
 	})
 }
+
+// TestTranslateRequestHeaderActions_DynamicEndpointSanitizesClusterName pins the exact
+// x-target-upstream name for a dotted/coloned definition name, locking it byte-for-byte to
+// the controller's clusterkey.DefinitionName so the two modules' cluster names cannot drift.
+func TestTranslateRequestHeaderActions_DynamicEndpointSanitizesClusterName(t *testing.T) {
+	kernel := NewKernel()
+	chainExecutor := executor.NewChainExecutor(nil, nil, nil)
+	server := NewExternalProcessorServer(kernel, chainExecutor, config.TracingConfig{}, "")
+	execCtx := newPolicyExecutionContext(server, "test-route", &registry.PolicyChain{})
+	execCtx.sharedCtx = &policy.SharedContext{APIKind: "RestApi", APIId: "api-123"}
+	execCtx.requestBodyCtx = &policy.RequestContext{
+		Path:          "/api/whoami",
+		SharedContext: execCtx.sharedCtx,
+	}
+	execCtx.apiContext = "/api"
+	execCtx.upstreamBasePath = "/sandbox"
+	execCtx.upstreamDefinitionPaths = map[string]string{"host.example.com:8080": "/alternate"}
+
+	targetUpstream := "host.example.com:8080"
+	result := &executor.RequestHeaderExecutionResult{
+		Results: []executor.RequestHeaderPolicyResult{
+			{Action: policy.UpstreamRequestHeaderModifications{UpstreamName: &targetUpstream}},
+		},
+	}
+
+	resp, err := TranslateRequestHeaderActions(result, &registry.PolicyChain{}, execCtx)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	hm := resp.GetRequestHeaders().GetResponse().GetHeaderMutation()
+	require.NotNil(t, hm)
+	var headerValue string
+	for _, h := range hm.SetHeaders {
+		if h.Header.Key == constants.TargetUpstreamHeader {
+			headerValue = string(h.Header.RawValue)
+		}
+	}
+	assert.Equal(t, "upstream_RestApi_api-123_host_example_com_8080", headerValue,
+		"dots and colons in the definition name must be replaced with underscores to match the controller's cluster name")
+}
