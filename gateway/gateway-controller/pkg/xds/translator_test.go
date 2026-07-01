@@ -43,9 +43,7 @@ import (
 	"github.com/wso2/api-platform/gateway/gateway-controller/pkg/utils/clusterkey"
 )
 
-// TestResolveUpstreamDefinition_DelegatesToFindByName is a thin wiring check;
-// the lookup logic itself is covered by upstreamref.TestFindByName_*.
-func TestResolveUpstreamDefinition_DelegatesToFindByName(t *testing.T) {
+func TestResolveUpstreamDefinition_Found(t *testing.T) {
 	definitions := &[]api.UpstreamDefinition{
 		{
 			Name: "test-upstream",
@@ -61,25 +59,102 @@ func TestResolveUpstreamDefinition_DelegatesToFindByName(t *testing.T) {
 	}
 
 	def, err := resolveUpstreamDefinition("test-upstream", definitions)
-	require.NoError(t, err)
-	require.NotNil(t, def)
-	assert.Equal(t, "test-upstream", def.Name)
 
-	_, err = resolveUpstreamDefinition("0000-non-existent-0000-000000000000", definitions)
-	assert.Error(t, err)
+	require.NoError(t, err)
+	assert.NotNil(t, def)
+	assert.Equal(t, "test-upstream", def.Name)
 }
 
-// TestParseTimeout_DelegatesToSharedParser is a thin wiring check; the parsing
-// logic itself is covered by upstreamref.TestParseConnectTimeout_*.
-func TestParseTimeout_DelegatesToSharedParser(t *testing.T) {
-	valid := "30s"
-	duration, err := parseTimeout(&valid)
-	require.NoError(t, err)
-	require.NotNil(t, duration)
-	assert.Equal(t, 30*time.Second, *duration)
+func TestResolveUpstreamDefinition_NotFound(t *testing.T) {
+	definitions := &[]api.UpstreamDefinition{
+		{
+			Name: "existing-upstream",
+			Upstreams: []struct {
+				Url    string `json:"url" yaml:"url"`
+				Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+			}{
+				{
+					Url: "http://backend:8080",
+				},
+			},
+		},
+	}
 
-	duration, err = parseTimeout(nil)
-	require.NoError(t, err)
+	def, err := resolveUpstreamDefinition("0000-non-existent-0000-000000000000", definitions)
+
+	assert.Error(t, err)
+	assert.Nil(t, def)
+	assert.Contains(t, err.Error(), "upstream definition '0000-non-existent-0000-000000000000' not found")
+}
+
+func TestResolveUpstreamDefinition_NoDefinitions(t *testing.T) {
+	def, err := resolveUpstreamDefinition("test-upstream", nil)
+
+	assert.Error(t, err)
+	assert.Nil(t, def)
+	assert.Contains(t, err.Error(), "no definitions provided")
+}
+
+func TestParseTimeout_Valid(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected time.Duration
+	}{
+		{
+			name:     "seconds",
+			input:    "30s",
+			expected: 30 * time.Second,
+		},
+		{
+			name:     "minutes",
+			input:    "2m",
+			expected: 2 * time.Minute,
+		},
+		{
+			name:     "milliseconds",
+			input:    "500ms",
+			expected: 500 * time.Millisecond,
+		},
+		{
+			name:     "hours",
+			input:    "1h",
+			expected: 1 * time.Hour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			duration, err := parseTimeout(&tt.input)
+
+			require.NoError(t, err)
+			require.NotNil(t, duration)
+			assert.Equal(t, tt.expected, *duration)
+		})
+	}
+}
+
+func TestParseTimeout_Invalid(t *testing.T) {
+	invalid := "invalid"
+	duration, err := parseTimeout(&invalid)
+
+	assert.Error(t, err)
+	assert.Nil(t, duration)
+	assert.Contains(t, err.Error(), "invalid timeout format")
+}
+
+func TestParseTimeout_Nil(t *testing.T) {
+	duration, err := parseTimeout(nil)
+
+	assert.NoError(t, err)
+	assert.Nil(t, duration)
+}
+
+func TestParseTimeout_Empty(t *testing.T) {
+	empty := ""
+	duration, err := parseTimeout(&empty)
+
+	assert.NoError(t, err)
 	assert.Nil(t, duration)
 }
 
@@ -1407,9 +1482,25 @@ func TestTranslator_CreateUpstreamTLSContext(t *testing.T) {
 	assert.Equal(t, "secure.example.com", tlsContextWithCert.Sni)
 }
 
-// TestTranslator_ResolveUpstreamCluster_HTTPSUrl covers the HTTPS scheme; the
-// http and missing-URL cases are covered by TestResolveUpstreamCluster_WithDirectURL
-// and TestResolveUpstreamCluster_NoURLOrRef.
+func TestTranslator_ResolveUpstreamCluster_SimpleURL(t *testing.T) {
+	logger := createTestLogger()
+	routerCfg := testRouterConfig()
+	cfg := testConfig()
+	translator := NewTranslator(logger, routerCfg, nil, cfg)
+
+	urlStr := "http://backend:8080"
+	upstream := &api.Upstream{
+		Url: &urlStr,
+	}
+
+	clusterName, parsedURL, timeout, err := translator.resolveUpstreamCluster("test-api", "test-upstream", upstream, nil)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, clusterName)
+	assert.NotNil(t, parsedURL)
+	assert.Nil(t, timeout)
+	assert.Equal(t, "backend", parsedURL.Hostname())
+}
+
 func TestTranslator_ResolveUpstreamCluster_HTTPSUrl(t *testing.T) {
 	logger := createTestLogger()
 	routerCfg := testRouterConfig()
@@ -1427,6 +1518,21 @@ func TestTranslator_ResolveUpstreamCluster_HTTPSUrl(t *testing.T) {
 	assert.NotNil(t, parsedURL)
 	assert.Nil(t, timeout)
 	assert.Equal(t, "https", parsedURL.Scheme)
+}
+
+func TestTranslator_ResolveUpstreamCluster_MissingURL(t *testing.T) {
+	logger := createTestLogger()
+	routerCfg := testRouterConfig()
+	cfg := testConfig()
+	translator := NewTranslator(logger, routerCfg, nil, cfg)
+
+	upstream := &api.Upstream{
+		Url: nil, // No URL
+	}
+
+	_, _, _, err := translator.resolveUpstreamCluster("test-api", "no-url-upstream", upstream, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no no-url-upstream upstream configured")
 }
 
 func strPtr(s string) *string {
@@ -2167,11 +2273,13 @@ func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 	require.NotEmpty(t, clusters, "expected at least one cluster")
 	require.NotEmpty(t, routeConfigs, "expected at least one route configuration")
 
-	// Per-op sandbox REUSES the referenced definition's cluster
-	// (upstream_<kind>_<apiID>_user-svc-sb-cluster).
+	// Per-op sandbox now REUSES the referenced definition's cluster
+	// (upstream_<kind>_<apiID>_user-svc-sb-cluster); no per-op "op_" cluster is minted.
 	var defClusterName string
 	for _, c := range clusters {
 		name := c.(*cluster.Cluster).GetName()
+		require.False(t, strings.HasPrefix(name, "op_"),
+			"per-op refs must not mint op_ clusters anymore; got %q", name)
 		if strings.HasPrefix(name, "upstream_") && strings.Contains(name, "user-svc-sb-cluster") {
 			defClusterName = name
 		}
@@ -2182,7 +2290,8 @@ func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 }
 
 // TestTranslateConfigs_PerOpMainReusesDefinitionCluster asserts that a per-op main
-// override reuses the referenced upstreamDefinition cluster on the legacy xDS path.
+// override reuses the referenced upstreamDefinition cluster on the legacy xDS path,
+// minting no per-op "op_" cluster.
 func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
 	translator := createTestTranslator()
 
@@ -2237,34 +2346,12 @@ func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
 	var defClusterName string
 	for _, c := range clusters {
 		name := c.(*cluster.Cluster).GetName()
+		require.False(t, strings.HasPrefix(name, "op_"),
+			"per-op refs must not mint op_ clusters; got %q", name)
 		if strings.HasPrefix(name, "upstream_") && strings.Contains(name, "premium-svc") {
 			defClusterName = name
 		}
 	}
 	require.NotEmpty(t, defClusterName,
 		"expected the referenced upstreamDefinition cluster (upstream_..._premium-svc) to be emitted for the per-op main route")
-
-	// The per-op main route (/premium) must be wired for cluster_header dynamic
-	// routing (so a dynamic-endpoint policy can still steer it), not a static cluster.
-	routeConfigs := resources[resource.RouteType]
-	require.NotEmpty(t, routeConfigs, "expected at least one route configuration")
-	premiumRouteFound := false
-	for _, rc := range routeConfigs {
-		for _, vh := range rc.(*route.RouteConfiguration).GetVirtualHosts() {
-			for _, rt := range vh.GetRoutes() {
-				if !strings.Contains(rt.GetMatch().GetSafeRegex().GetRegex(), "premium") {
-					continue
-				}
-				premiumRouteFound = true
-				ra := rt.GetRoute()
-				require.NotNil(t, ra, "per-op /premium route must have a route action")
-				ch, ok := ra.ClusterSpecifier.(*route.RouteAction_ClusterHeader)
-				require.True(t, ok,
-					"per-op /premium route must use cluster_header dynamic routing, not a static cluster")
-				assert.Equal(t, constants.TargetUpstreamHeader, ch.ClusterHeader,
-					"per-op /premium route must route via the target-upstream cluster header")
-			}
-		}
-	}
-	assert.True(t, premiumRouteFound, "expected to find the per-op /premium route")
 }

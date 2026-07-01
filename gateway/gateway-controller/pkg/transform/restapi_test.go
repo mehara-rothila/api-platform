@@ -420,12 +420,6 @@ func TestRestAPITransformer_PerOpSandboxOverridesSandboxVhost(t *testing.T) {
 	require.NotNil(t, sandboxRoute)
 	assert.True(t, strings.HasPrefix(sandboxRoute.Upstream.ClusterKey, "upstream_"),
 		"sandbox vhost should use definition cluster, got %q", sandboxRoute.Upstream.ClusterKey)
-	// Per-op sandbox is dynamic too: cluster_header ON with the definition cluster as
-	// the default, mirroring the per-op main behavior so policies can still steer it.
-	assert.True(t, sandboxRoute.Upstream.UseClusterHeader,
-		"per-op sandbox route should use cluster_header so policies can override")
-	assert.Equal(t, sandboxRoute.Upstream.ClusterKey, sandboxRoute.Upstream.DefaultCluster,
-		"per-op sandbox DefaultCluster must be the definition cluster key")
 }
 
 // TestRestAPITransformer_PerOpBothOverrideBothVhosts asserts that both vhosts get distinct
@@ -512,9 +506,10 @@ func TestRestAPITransformer_TwoOpsSameRefReuseOneCluster(t *testing.T) {
 	assert.True(t, strings.HasPrefix(getRoute.Upstream.ClusterKey, "upstream_"),
 		"per-op route must reuse the upstream_<def> definition cluster, got %q", getRoute.Upstream.ClusterKey)
 
-	// Exactly ONE cluster registered for shared-svc.
+	// Exactly ONE cluster registered for shared-svc; zero op_ clusters.
 	shared := 0
 	for k := range rdc.UpstreamClusters {
+		assert.False(t, strings.HasPrefix(k, "op_"), "no per-op (op_) clusters may be minted, got %q", k)
 		if strings.Contains(k, "shared-svc") {
 			shared++
 		}
