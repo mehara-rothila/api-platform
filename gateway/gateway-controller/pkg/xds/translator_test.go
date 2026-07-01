@@ -2350,3 +2350,143 @@ func TestTranslateConfigs_PerOpMainReusesDefinitionCluster(t *testing.T) {
 	require.NotEmpty(t, defClusterName,
 		"expected the referenced upstreamDefinition cluster (upstream_..._premium-svc) to be emitted for the per-op main route")
 }
+
+// TestTranslateConfigs_PerOpRoutesUseClusterHeaderAndDefinitionBasePath asserts that a
+// per-op main or sandbox ref produces an Envoy route wired for cluster_header dynamic
+// routing (so a dynamic-endpoint policy can still steer it), strips the target-upstream
+// header before forwarding, and rewrites the path with the referenced definition's base
+// path. This covers the translateAPIConfig -> createRoute path, beyond just asserting the
+// definition cluster is emitted.
+func TestTranslateConfigs_PerOpRoutesUseClusterHeaderAndDefinitionBasePath(t *testing.T) {
+	assertPerOpRoute := func(t *testing.T, r *route.Route, defBasePath string) {
+		t.Helper()
+		require.NotNil(t, r, "expected the per-op route to be generated")
+		ra := r.GetRoute()
+		require.NotNil(t, ra, "per-op route must have a route action")
+		ch, ok := ra.ClusterSpecifier.(*route.RouteAction_ClusterHeader)
+		require.True(t, ok, "per-op route must use cluster_header dynamic routing, not a static cluster")
+		assert.Equal(t, constants.TargetUpstreamHeader, ch.ClusterHeader,
+			"per-op route must route via the target-upstream cluster header")
+		assert.Contains(t, r.RequestHeadersToRemove, constants.TargetUpstreamHeader,
+			"per-op route must strip the target-upstream header before forwarding upstream")
+		assert.Contains(t, ra.GetRegexRewrite().GetSubstitution(), defBasePath,
+			"per-op route must rewrite the path with the referenced definition base path")
+	}
+
+	t.Run("per-op main ref", func(t *testing.T) {
+		translator := createTestTranslator()
+		apiData := api.APIConfigData{
+			DisplayName: "Test API",
+			Context:     "/test",
+			Version:     "v1.0",
+			Vhosts: &struct {
+				Main    string  `json:"main" yaml:"main"`
+				Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{Main: "localhost"},
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{Main: api.Upstream{Url: strPtr("http://api-main:8080")}},
+			UpstreamDefinitions: &[]api.UpstreamDefinition{
+				{Name: "premium-svc", BasePath: strPtr("/premium-svc"), Upstreams: []struct {
+					Url    string `json:"url" yaml:"url"`
+					Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+				}{{Url: "http://premium-svc:8080"}}},
+			},
+			Operations: []api.Operation{
+				{Method: "GET", Path: "/premium",
+					Upstream: &api.RestAPIOperationUpstream{
+						Main: &api.RestAPIOperationUpstreamTarget{Ref: "premium-svc"},
+					}},
+			},
+		}
+		cfg := &models.StoredConfig{
+			UUID: "main-route-api",
+			Kind: string(api.RestAPIKindRestApi),
+			Configuration: api.RestAPI{
+				Kind:     api.RestAPIKindRestApi,
+				Metadata: api.Metadata{Name: "main-route-api"},
+				Spec:     apiData,
+			},
+		}
+
+		resources, err := translator.TranslateConfigs([]*models.StoredConfig{cfg}, "test-correlation")
+		require.NoError(t, err)
+
+		var premiumRoute *route.Route
+		for _, rc := range resources[resource.RouteType] {
+			for _, vh := range rc.(*route.RouteConfiguration).GetVirtualHosts() {
+				for _, rt := range vh.GetRoutes() {
+					if strings.Contains(rt.GetMatch().GetSafeRegex().GetRegex(), "premium") {
+						premiumRoute = rt
+					}
+				}
+			}
+		}
+		assertPerOpRoute(t, premiumRoute, "/premium-svc")
+	})
+
+	t.Run("per-op sandbox ref without API-level sandbox", func(t *testing.T) {
+		translator := createTestTranslator()
+		sbVhost := "sandbox.local"
+		apiData := api.APIConfigData{
+			DisplayName: "Test API",
+			Context:     "/test",
+			Version:     "v1.0",
+			Vhosts: &struct {
+				Main    string  `json:"main" yaml:"main"`
+				Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{Main: "localhost", Sandbox: &sbVhost},
+			Upstream: struct {
+				Main    api.Upstream  `json:"main" yaml:"main"`
+				Sandbox *api.Upstream `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+			}{Main: api.Upstream{Url: strPtr("http://api-main:8080")}},
+			UpstreamDefinitions: &[]api.UpstreamDefinition{
+				{Name: "sb-svc", BasePath: strPtr("/sb-svc"), Upstreams: []struct {
+					Url    string `json:"url" yaml:"url"`
+					Weight *int   `json:"weight,omitempty" yaml:"weight,omitempty"`
+				}{{Url: "http://sb-svc:8080"}}},
+			},
+			Operations: []api.Operation{
+				{Method: "GET", Path: "/users",
+					Upstream: &api.RestAPIOperationUpstream{
+						Sandbox: &api.RestAPIOperationUpstreamTarget{Ref: "sb-svc"},
+					}},
+			},
+		}
+		cfg := &models.StoredConfig{
+			UUID: "sandbox-route-api",
+			Kind: string(api.RestAPIKindRestApi),
+			Configuration: api.RestAPI{
+				Kind:     api.RestAPIKindRestApi,
+				Metadata: api.Metadata{Name: "sandbox-route-api"},
+				Spec:     apiData,
+			},
+		}
+
+		resources, err := translator.TranslateConfigs([]*models.StoredConfig{cfg}, "test-correlation")
+		require.NoError(t, err)
+
+		var sandboxRoute *route.Route
+		for _, rc := range resources[resource.RouteType] {
+			for _, vh := range rc.(*route.RouteConfiguration).GetVirtualHosts() {
+				matchesSandbox := false
+				for _, d := range vh.GetDomains() {
+					if strings.Contains(d, "sandbox.local") {
+						matchesSandbox = true
+						break
+					}
+				}
+				if !matchesSandbox {
+					continue
+				}
+				for _, rt := range vh.GetRoutes() {
+					if strings.Contains(rt.GetMatch().GetSafeRegex().GetRegex(), "users") {
+						sandboxRoute = rt
+					}
+				}
+			}
+		}
+		assertPerOpRoute(t, sandboxRoute, "/sb-svc")
+	})
+}
