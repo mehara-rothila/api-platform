@@ -2215,9 +2215,9 @@ func TestResolveUpstreamCluster_NameNotURLDerived(t *testing.T) {
 		"cluster name must not contain the backend host")
 }
 
-// TestTranslateConfigs_PerOpSandboxClusterEmitted asserts that the legacy path
-// emits a dedicated per-op sandbox cluster and routes the sandbox vhost to it
-// when an operation declares a per-op sandbox upstream override.
+// TestTranslateConfigs_PerOpSandboxClusterEmitted asserts that the legacy xDS path
+// emits the referenced upstreamDefinition cluster for a per-op sandbox upstream
+// override, so the sandbox route can reuse it.
 func TestTranslateConfigs_PerOpSandboxClusterEmitted(t *testing.T) {
 	translator := createTestTranslator()
 
