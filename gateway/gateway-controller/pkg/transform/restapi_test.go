@@ -948,3 +948,37 @@ func TestRestAPITransformer_APILevelPolicyPrecedesOperationLevelInChain(t *testi
 	assert.Equal(t, "op-pol", chain.Policies[1].Name,
 		"operation-level policy must come after the API-level policy so it wins as the last write in the kernel")
 }
+
+// TestRestAPITransformer_PerOpMainKeptWhenVhostsEqual pins that a per-op main override
+// survives when the main and sandbox vhosts are the same string and no sandbox upstream
+// exists; the route dispatch must key on the vhost's role, not its name.
+func TestRestAPITransformer_PerOpMainKeptWhenVhostsEqual(t *testing.T) {
+	transformer := NewRestAPITransformer(testRouterCfg(), &config.Config{}, map[string]models.PolicyDefinition{})
+	cfg := makeRestAPIWithOps([]api.Operation{
+		{
+			Method: "GET", Path: "/users",
+			Upstream: &api.RestAPIOperationUpstream{
+				Main: &api.RestAPIOperationUpstreamTarget{Ref: "user-svc-cluster"},
+			},
+		},
+	})
+	restAPI := cfg.Configuration.(api.RestAPI)
+	restAPI.Spec.Upstream.Sandbox = nil
+	same := "same.local"
+	restAPI.Spec.Vhosts = &struct {
+		Main    string  `json:"main" yaml:"main"`
+		Sandbox *string `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
+	}{Main: same, Sandbox: &same}
+	cfg.Configuration = restAPI
+
+	rdc, err := transformer.Transform(cfg)
+	require.NoError(t, err)
+
+	route := rdc.Routes["GET|/test/users|same.local"]
+	require.NotNil(t, route, "main route must exist")
+	want := clusterkey.DefinitionName("RestApi", cfg.UUID, "user-svc-cluster")
+	assert.Equal(t, want, route.Upstream.ClusterKey,
+		"per-op main override must survive equal main/sandbox vhosts")
+	assert.Equal(t, want, route.Upstream.DefaultCluster,
+		"cluster_header default must be the per-op cluster, not the API-level one")
+}

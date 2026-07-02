@@ -221,14 +221,16 @@ func (t *RestAPITransformer) Transform(cfg *models.StoredConfig) (*models.Runtim
 			vhosts = append(vhosts, effectiveSandboxVHost)
 		}
 
-		for _, vhost := range vhosts {
+		for i, vhost := range vhosts {
 			routeKey := xds.GenerateRouteName(string(op.Method), apiData.Context, apiData.Version, op.Path, vhost)
 
 			clusterKey := mainVhostClusterKey
 			vhostUseClusterHeader := mainVhostUseClusterHeader
 			vhostDefaultCluster := mainVhostDefaultCluster
 			autoHostRewrite := mainVhostAutoHostRewrite
-			if vhost == effectiveSandboxVHost {
+			// vhosts[0] is always main and the sandbox vhost, when present, is appended
+			// second; dispatch on position so equal vhost strings cannot misroute.
+			if i > 0 {
 				clusterKey = sandboxVhostClusterKey
 				vhostUseClusterHeader = sandboxVhostUseClusterHeader
 				vhostDefaultCluster = sandboxVhostDefaultCluster
